@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>B2B - Browser to Browser</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <main class="container">
+
+        <h1>B2B</h1>
+
+        <p class="subtitle">
+            Browser to Browser Transfer
+        </p>
+
+        <!-- Create Room -->
+
+        <section id="home-screen">
+
+            <button id="create-room-btn">
+                Create Room
+            </button>
+
+            <div class="divider">
+                OR
+            </div>
+
+            <input
+                type="text"
+                id="room-code-input"
+                placeholder="Enter Room Code"
+                maxlength="6"
+            >
+
+            <button id="join-room-btn">
+                Join Room
+            </button>
+
+        </section>
+
+
+        <!-- Room Screen -->
+
+        <section id="room-screen" class="hidden">
+
+            <p>Your Room Code</p>
+
+            <div id="room-code">
+                ------
+            </div>
+
+            <button id="copy-room-btn">
+                Copy Room Code
+            </button>
+
+            <p id="connection-status">
+                Waiting for another browser...
+            </p>
+
+
+            <!-- Transfer Area -->
+
+            <div id="transfer-section" class="hidden">
+
+                <div class="transfer-card">
+
+                    <h2>Send Files</h2>
+
+                    <input
+                        type="file"
+                        id="file-input"
+                        multiple
+                    >
+
+                    <button id="send-file-btn">
+                        Send Selected Files
+                    </button>
+
+                </div>
+
+
+                <!-- Incoming File -->
+
+                <div
+                    id="incoming-file-section"
+                    class="hidden"
+                >
+
+                    <h2>Incoming File</h2>
+
+                    <div id="incoming-file-name">
+                        File
+                    </div>
+
+                    <div id="incoming-file-size">
+                        0 MB
+                    </div>
+
+                    <button id="accept-file-btn">
+                        Accept & Save
+                    </button>
+
+                </div>
+
+
+                <!-- Transfer Progress -->
+
+                <div
+                    id="transfer-progress-section"
+                    class="hidden"
+                >
+
+                    <h2 id="transfer-title">
+                        Transfer
+                    </h2>
+
+                    <div class="progress-container">
+
+                        <div
+                            id="progress-bar"
+                            class="progress-bar"
+                        ></div>
+
+                    </div>
+
+                    <p id="progress-text">
+                        0%
+                    </p>
+
+                    <p id="transfer-speed">
+                        Speed: 0 MB/s
+                    </p>
+
+                    <p id="transfer-status">
+                        Waiting...
+                    </p>
+
+                </div>
+
+
+            </div>
+
+        </section>
+
+
+        <!-- Error -->
+
+        <p id="error-message"></p>
+
+    </main>
+
+
+    <!-- Socket.IO client -->
+    <script src="/socket.io/socket.io.js"></script>
+
+    <!-- B2B JavaScript -->
+    <script src="js/signaling.js"></script>
+    <script src="js/webrtc.js"></script>
+    <script src="js/transfer.js"></script>
+    <script src="js/app.js"></script>
+
+</body>
+
+</html>

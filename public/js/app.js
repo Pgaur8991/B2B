@@ -1,139 +1,140 @@
-const transferSection =
-    document.getElementById("transfer-section");
+const transferSection = document.getElementById("transfer-section");
+const createRoomButton = document.getElementById("create-room-btn");
+const joinRoomButton = document.getElementById("join-room-btn");
+const roomCodeInput = document.getElementById("room-code-input");
+const homeScreen = document.getElementById("home-screen");
+const roomScreen = document.getElementById("room-screen");
+const roomCodeDisplay = document.getElementById("room-code");
+const connectionStatus = document.getElementById("connection-status");
+const errorMessage = document.getElementById("error-message");
+const copyRoomButton = document.getElementById("copy-room-btn");
 
-const testMessageButton =
-    document.getElementById("test-message-btn");
+// Make sure the required HTML elements exist before attaching listeners.
+if (!createRoomButton || !joinRoomButton || !roomCodeInput || !homeScreen || !roomScreen) {
+    console.error("B2B: Required UI elements are missing from index.html.");
+}
 
-const receivedMessage =
-    document.getElementById("received-message");
+// =========================
+// CREATE ROOM
+// =========================
 
-const createRoomButton =
-    document.getElementById("create-room-btn");
+if (createRoomButton) {
+    createRoomButton.addEventListener("click", () => {
+        clearError();
+        console.log("B2B: Create Room clicked");
 
-const joinRoomButton =
-    document.getElementById("join-room-btn");
+        if (typeof window.createRoom === "function") {
+            window.createRoom();
+        } else {
+            showError("Signaling code is not loaded. Refresh the page.");
+            console.error("B2B: createRoom() is not available.");
+        }
+    });
+}
 
-const roomCodeInput =
-    document.getElementById("room-code-input");
+// =========================
+// JOIN ROOM
+// =========================
 
-const homeScreen =
-    document.getElementById("home-screen");
+if (joinRoomButton) {
+    joinRoomButton.addEventListener("click", () => {
+        clearError();
 
-const roomScreen =
-    document.getElementById("room-screen");
+        const roomCode = roomCodeInput.value.trim().toUpperCase();
 
-const roomCodeDisplay =
-    document.getElementById("room-code");
+        if (roomCode.length !== 6) {
+            showError("Please enter a valid 6-character room code.");
+            return;
+        }
 
-const connectionStatus =
-    document.getElementById("connection-status");
+        if (typeof window.joinRoom === "function") {
+            window.joinRoom(roomCode);
+        } else {
+            showError("Signaling code is not loaded. Refresh the page.");
+            console.error("B2B: joinRoom() is not available.");
+        }
+    });
+}
 
-const errorMessage =
-    document.getElementById("error-message");
+// =========================
+// COPY ROOM CODE
+// =========================
 
-const copyRoomButton =
-    document.getElementById("copy-room-btn");
+if (copyRoomButton) {
+    copyRoomButton.addEventListener("click", async () => {
+        const code = roomCodeDisplay.textContent.trim();
 
+        try {
+            await navigator.clipboard.writeText(code);
+            copyRoomButton.textContent = "Copied!";
 
-// Create room
-createRoomButton.addEventListener("click", () => {
+            setTimeout(() => {
+                copyRoomButton.textContent = "Copy Room Code";
+            }, 1500);
+        } catch (error) {
+            showError("Unable to copy room code.");
+            console.error("B2B: Clipboard error", error);
+        }
+    });
+}
 
-    clearError();
+// =========================
+// SHOW ROOM
+// =========================
 
-    createRoom();
+window.showRoom = function showRoom(code) {
+    console.log("B2B: Showing room", code);
 
-});
-
-
-// Join room
-joinRoomButton.addEventListener("click", () => {
-
-    clearError();
-
-    const roomCode = roomCodeInput.value.trim();
-
-    if (roomCode.length !== 6) {
-
-        showError("Please enter a valid 6-character room code.");
-
+    if (!homeScreen || !roomScreen || !roomCodeDisplay) {
+        console.error("B2B: Room screen elements are missing.");
         return;
     }
 
-    joinRoom(roomCode);
-
-});
-
-
-// Copy room code
-copyRoomButton.addEventListener("click", async () => {
-
-    const code = roomCodeDisplay.textContent;
-
-    await navigator.clipboard.writeText(code);
-
-    copyRoomButton.textContent = "Copied!";
-
-    setTimeout(() => {
-
-        copyRoomButton.textContent = "Copy Room Code";
-
-    }, 1500);
-
-});
-
-
-// Show room
-function showRoom(code) {
-
     homeScreen.classList.add("hidden");
-
     roomScreen.classList.remove("hidden");
-
     roomCodeDisplay.textContent = code;
+};
 
-}
+// =========================
+// UPDATE CONNECTION STATUS
+// =========================
 
+window.updateStatus = function updateStatus(message) {
+    if (connectionStatus) {
+        connectionStatus.textContent = message;
+    }
+};
 
-// Update connection status
-function updateStatus(message) {
+// =========================
+// SHOW ERROR
+// =========================
 
-    connectionStatus.textContent = message;
+window.showError = function showError(message) {
+    if (errorMessage) {
+        errorMessage.textContent = message;
+    }
 
-}
+    console.error("B2B:", message);
+};
 
+// =========================
+// CLEAR ERROR
+// =========================
 
-// Show error
-function showError(message) {
+window.clearError = function clearError() {
+    if (errorMessage) {
+        errorMessage.textContent = "";
+    }
+};
 
-    errorMessage.textContent = message;
+// =========================
+// SHOW TRANSFER SECTION
+// =========================
 
-}
+window.showTransferSection = function showTransferSection() {
+    if (transferSection) {
+        transferSection.classList.remove("hidden");
+    }
+};
 
-
-// Clear error
-function clearError() {
-
-    errorMessage.textContent = "";
-
-}
-
-// Display received message
-function displayReceivedMessage(message) {
-    receivedMessage.textContent = `Received: ${message}`;
-}
-
-testMessageButton.addEventListener("click", () => {
-
-    sendTestMessage();
-
-});
-
-function showTransferSection() {
-
-    transferSection.classList.remove("hidden");
-}
-
-function displayReceivedMessage(message) {
-    receivedMessage.textContent = 
-    `Received: ${message}`;
-}
+console.log("B2B: app.js loaded successfully");

@@ -82,7 +82,7 @@
                     <input type="file" id="file-input" multiple hidden>
                     <label for="file-input" class="primary-btn file-btn">Select Files</label>
 
-                    <div id="selected-files" class="selected-files"></div>
+                    <div id="selected-files" class="selected-files" aria-live="polite"></div>
                 </div>
 
                 <div class="panel transfer-panel">
@@ -105,13 +105,18 @@
                     </div>
 
                     <div id="transfer-progress-section" class="transfer-card hidden">
-                        <h3 id="transfer-title">Transfer</h3>
+                        <div class="transfer-heading-row">
+                            <h3 id="transfer-title">Transfer</h3>
+                            <button id="cancel-transfer-btn" class="danger-btn hidden" type="button">Cancel Transfer</button>
+                        </div>
                         <div class="progress-container">
                             <div id="progress-bar" class="progress-bar"></div>
                         </div>
-                        <p id="progress-text">0%</p>
-                        <p id="transfer-speed">Speed: 0 MB/s</p>
-                        <p id="transfer-status">Waiting...</p>
+                        <div class="progress-meta">
+                            <p id="progress-text">0%</p>
+                            <p id="transfer-speed">Speed: 0 MB/s</p>
+                        </div>
+                        <p id="transfer-status" data-status="idle">Waiting...</p>
                     </div>
                 </div>
             </div>
@@ -120,12 +125,15 @@
         <p id="error-message" class="error-message" role="alert"></p>
     </main>
 
+    <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
     <div id="qr-modal" class="modal hidden" aria-hidden="true">
         <div class="modal-card">
             <button id="close-qr-btn" class="modal-close" type="button" aria-label="Close">×</button>
             <span class="eyebrow">SCAN TO JOIN</span>
             <h2>Room <span id="qr-room-code"></span></h2>
-            <canvas id="qr-canvas" width="240" height="240"></canvas>
+            <div id="qr-loading" class="qr-loading">Generating QR code...</div>
+            <canvas id="qr-canvas" width="240" height="240" aria-label="Room QR code"></canvas>
             <p class="muted">Scan this QR code on another browser.</p>
         </div>
     </div>

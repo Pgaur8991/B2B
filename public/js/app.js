@@ -13,7 +13,9 @@ const appQrRoomButton = document.getElementById("qr-room-btn");
 const appQrModal = document.getElementById("qr-modal");
 const appQrCanvas = document.getElementById("qr-canvas");
 const appQrRoomCode = document.getElementById("qr-room-code");
+const appQrLoading = document.getElementById("qr-loading");
 const appCloseQrButton = document.getElementById("close-qr-btn");
+const appToastContainer = document.getElementById("toast-container");
 const appFileInput = document.getElementById("file-input");
 const appSelectedFiles = document.getElementById("selected-files");
 const appDropZone = document.getElementById("drop-zone");
@@ -29,6 +31,19 @@ function showError(message) {
 
 window.clearError = clearError;
 window.showError = showError;
+
+window.showToast = function showToast(type, message) {
+    if (!appToastContainer) return;
+
+    const toast = document.createElement("div");
+    toast.className = `toast ${type || ""}`;
+    toast.textContent = message;
+    appToastContainer.appendChild(toast);
+
+    setTimeout(() => {
+        toast.remove();
+    }, 3200);
+};
 
 if (appCreateRoomButton) {
     appCreateRoomButton.addEventListener("click", () => {
@@ -96,6 +111,8 @@ if (appCopyRoomButton) {
             await navigator.clipboard.writeText(code);
             const label = appCopyRoomButton.querySelector(".copy-label");
             if (label) label.textContent = "Copied";
+            window.showToast("success", "Room code copied");
+
             setTimeout(() => {
                 if (label) label.textContent = "Copy";
             }, 1500);
@@ -116,6 +133,10 @@ function openQrModal() {
     }
 
     appQrRoomCode.textContent = code;
+    appQrCanvas.classList.add("hidden");
+    appQrLoading?.classList.remove("hidden");
+    appQrModal?.classList.remove("hidden");
+    appQrModal?.setAttribute("aria-hidden", "false");
 
     window.QRCode.toCanvas(appQrCanvas, code, {
         width: 220,
@@ -124,12 +145,14 @@ function openQrModal() {
     }, (error) => {
         if (error) {
             console.error("B2B: QR error", error);
+            appQrModal?.classList.add("hidden");
+            appQrModal?.setAttribute("aria-hidden", "true");
             showError("Could not create the QR code.");
             return;
         }
 
-        appQrModal?.classList.remove("hidden");
-        appQrModal?.setAttribute("aria-hidden", "false");
+        appQrLoading?.classList.add("hidden");
+        appQrCanvas.classList.remove("hidden");
     });
 }
 
@@ -158,7 +181,7 @@ if (appFileInput) {
         if (!appSelectedFiles) return;
 
         if (!files.length) {
-            appSelectedFiles.textContent = "";
+            appSelectedFiles.innerHTML = "";
             return;
         }
 

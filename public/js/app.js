@@ -33,6 +33,7 @@ let scannerRunning = false;
 let scannerAnimationFrame = null;
 let scannerCanvas = null;
 let scannerCanvasContext = null;
+let qrDetector = null;
 
 function clearError() {
     if (appErrorMessage) appErrorMessage.textContent = "";
@@ -137,7 +138,19 @@ if (appCopyRoomButton) {
     });
 }
 
-function getJoinUrl(code) {
+async function getJoinUrl(code) {
+    try {
+        const response = await fetch(`/join-url?room=${encodeURIComponent(code)}`, {
+            cache: "no-store"
+        });
+        if (response.ok) {
+            const data = await response.json();
+            if (data?.url) return data.url;
+        }
+    } catch (error) {
+        console.warn("B2B: Could not get network join URL. Falling back to current page URL.", error);
+    }
+
     const url = new URL(window.location.href);
     url.search = "";
     url.hash = "";
@@ -163,11 +176,9 @@ function showQrImage(url) {
     appQrLoading?.classList.add("hidden");
 }
 
-function openQrModal() {
+async function openQrModal() {
     const code = appRoomCodeDisplay?.textContent.trim() || "";
     if (!code || code === "------") return;
-
-    const joinUrl = getJoinUrl(code);
 
     appQrRoomCode.textContent = code;
     appQrCanvas?.classList.add("hidden");
@@ -177,6 +188,10 @@ function openQrModal() {
 
     const existingImage = document.getElementById("qr-image");
     existingImage?.classList.add("hidden");
+
+    const joinUrl = await getJoinUrl(code);
+
+    if (!appQrModal || appQrModal.classList.contains("hidden")) return;
 
     if (window.QRCode?.toCanvas) {
         window.QRCode.toCanvas(appQrCanvas, joinUrl, {
@@ -260,6 +275,11 @@ async function startScanner() {
         return;
     }
 
+    if (!window.isSecureContext) {
+        scannerStatus.textContent = "Camera scanning needs HTTPS. You can still use your phone's normal camera app to scan the B2B QR code.";
+        return;
+    }
+
     stopScanner();
 
     try {
@@ -285,6 +305,42 @@ async function startScanner() {
     }
 }
 
+async function detectQrFromVideo() {
+    if ("BarcodeDetector" in window) {
+        try {
+            if (!qrDetector) {
+                const supported = typeof BarcodeDetector.getSupportedFormats === "function"
+                    ? await BarcodeDetector.getSupportedFormats()
+                    : ["qr_code"];
+
+                if (supported.includes("qr_code")) {
+                    qrDetector = new BarcodeDetector({ formats: ["qr_code"] });
+                }
+            }
+
+            if (qrDetector) {
+                const codes = await qrDetector.detect(scannerVideo);
+                if (codes.length && codes[0].rawValue) return codes[0].rawValue;
+            }
+        } catch (error) {
+            console.warn("B2B: BarcodeDetector unavailable, using jsQR fallback.");
+            qrDetector = null;
+        }
+    }
+
+    if (typeof window.jsQR === "function" && scannerCanvasContext) {
+        const width = scannerVideo.videoWidth;
+        const height = scannerVideo.videoHeight;
+        const imageData = scannerCanvasContext.getImageData(0, 0, width, height);
+        const result = window.jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "attemptBoth"
+        });
+        if (result?.data) return result.data;
+    }
+
+    return null;
+}
+
 async function scanLoop() {
     if (!scannerRunning) return;
 
@@ -298,26 +354,13 @@ async function scanLoop() {
             scannerCanvasContext.drawImage(scannerVideo, 0, 0, width, height);
 
             try {
-                if ("BarcodeDetector" in window) {
-                    const detector = scanLoop.detector || new BarcodeDetector({ formats: ["qr_code"] });
-                    scanLoop.detector = detector;
-                    const codes = await detector.detect(scannerVideo);
-                    if (codes.length && codes[0].rawValue) {
-                        await handleScannedValue(codes[0].rawValue);
-                        return;
-                    }
-                } else if (typeof window.jsQR === "function") {
-                    const imageData = scannerCanvasContext.getImageData(0, 0, width, height);
-                    const result = window.jsQR(imageData.data, imageData.width, imageData.height, {
-                        inversionAttempts: "attemptBoth"
-                    });
-                    if (result?.data) {
-                        await handleScannedValue(result.data);
-                        return;
-                    }
+                const rawValue = await detectQrFromVideo();
+                if (rawValue) {
+                    await handleScannedValue(rawValue);
+                    return;
                 }
             } catch (error) {
-                // Keep scanning. Browser detector support varies by device.
+                // Keep scanning. Browser camera/QR support varies by device.
             }
         }
     }
@@ -339,7 +382,7 @@ function stopScanner() {
     }
 
     if (scannerVideo) scannerVideo.srcObject = null;
-    scanLoop.detector = null;
+    qrDetector = null;
 }
 
 if (appScanConnectButton) appScanConnectButton.addEventListener("click", openScannerModal);

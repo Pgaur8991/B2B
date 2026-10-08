@@ -39,10 +39,22 @@ function createPeerConnection() {
 
         if (peerConnection.connectionState === "disconnected") {
             updateStatus("🟡 Peer disconnected.");
+            if (typeof failOutgoingTransfer === "function") {
+                failOutgoingTransfer("Peer disconnected during the transfer.");
+            }
+            if (typeof handleIncomingTransferDisconnect === "function") {
+                handleIncomingTransferDisconnect();
+            }
         }
 
         if (peerConnection.connectionState === "failed") {
             updateStatus("🔴 WebRTC connection failed.");
+            if (typeof failOutgoingTransfer === "function") {
+                failOutgoingTransfer("P2P connection failed during the transfer.");
+            }
+            if (typeof handleIncomingTransferDisconnect === "function") {
+                handleIncomingTransferDisconnect();
+            }
         }
     };
 
@@ -147,6 +159,10 @@ function setupDataChannel() {
     dataChannel.onopen = () => {
         console.log("🎉 DataChannel OPEN!");
 
+        if (typeof resetOutgoingTransferState === "function") {
+            resetOutgoingTransferState();
+        }
+
         updateStatus("🟢 Direct P2P connection ready!");
         showTransferSection();
     };
@@ -154,25 +170,34 @@ function setupDataChannel() {
     dataChannel.onclose = () => {
         console.log("DataChannel closed.");
         updateStatus("🟡 P2P connection closed.");
+
+        if (typeof failOutgoingTransfer === "function") {
+            failOutgoingTransfer("Peer disconnected during the transfer.");
+        }
+
+        if (typeof handleIncomingTransferDisconnect === "function") {
+            handleIncomingTransferDisconnect();
+        }
     };
 
     dataChannel.onerror = (error) => {
         console.error("DataChannel error:", error);
         updateStatus("🔴 P2P data channel error.");
+
+        if (typeof failOutgoingTransfer === "function") {
+            failOutgoingTransfer("P2P data channel error during the transfer.");
+        }
     };
 
     dataChannel.onmessage = (event) => {
         console.log("Data received:", event.data);
 
-        // transfer.js serializes messages so file chunks and FILE_END
-        // cannot race each other while async disk writes are pending.
         if (typeof enqueueIncomingMessage === "function") {
             enqueueIncomingMessage(event.data);
         } else if (typeof handleIncomingTransferMessage === "function") {
             handleIncomingTransferMessage(event.data);
         }
 
-        // Keep the old test-message display.
         if (
             typeof event.data === "string" &&
             !event.data.startsWith("{") &&

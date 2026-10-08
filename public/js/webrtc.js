@@ -6,13 +6,11 @@ let isInitiator = false;
 
 // STUN server
 const rtcConfiguration = {
-
     iceServers: [
         {
             urls: "stun:stun.l.google.com:19302"
         }
     ]
-
 };
 
 
@@ -21,104 +19,43 @@ const rtcConfiguration = {
 // =========================
 
 function createPeerConnection() {
-
     console.log("Creating RTCPeerConnection...");
 
-    peerConnection = new RTCPeerConnection(
-        rtcConfiguration
-    );
+    peerConnection = new RTCPeerConnection(rtcConfiguration);
 
-
-    // ICE candidate generated
     peerConnection.onicecandidate = (event) => {
-
         if (event.candidate) {
-
-            console.log(
-                "Sending ICE candidate"
-            );
-
-            socket.emit(
-                "ice-candidate",
-                event.candidate
-            );
-
+            console.log("Sending ICE candidate");
+            socket.emit("ice-candidate", event.candidate);
         }
-
     };
 
-
-    // Connection state
     peerConnection.onconnectionstatechange = () => {
+        console.log("Connection state:", peerConnection.connectionState);
 
-        console.log(
-            "Connection state:",
-            peerConnection.connectionState
-        );
-
-
-        if (
-            peerConnection.connectionState ===
-            "connected"
-        ) {
-
-            updateStatus(
-                "🟢 P2P connection established!"
-            );
-
+        if (peerConnection.connectionState === "connected") {
+            updateStatus("🟢 P2P connection established!");
         }
 
-
-        if (
-            peerConnection.connectionState ===
-            "disconnected"
-        ) {
-
-            updateStatus(
-                "🟡 Peer disconnected."
-            );
-
+        if (peerConnection.connectionState === "disconnected") {
+            updateStatus("🟡 Peer disconnected.");
         }
 
-
-        if (
-            peerConnection.connectionState ===
-            "failed"
-        ) {
-
-            updateStatus(
-                "🔴 WebRTC connection failed."
-            );
-
+        if (peerConnection.connectionState === "failed") {
+            updateStatus("🔴 WebRTC connection failed.");
         }
-
     };
 
-
-    // ICE connection state
     peerConnection.oniceconnectionstatechange = () => {
-
-        console.log(
-            "ICE state:",
-            peerConnection.iceConnectionState
-        );
-
+        console.log("ICE state:", peerConnection.iceConnectionState);
     };
 
-
-    // Receiver gets DataChannel
     peerConnection.ondatachannel = (event) => {
-
-        console.log(
-            "DataChannel received."
-        );
+        console.log("DataChannel received.");
 
         dataChannel = event.channel;
-
         setupDataChannel();
-
     };
-
 }
 
 
@@ -127,43 +64,21 @@ function createPeerConnection() {
 // =========================
 
 async function createOffer() {
-
     console.log("Creating WebRTC offer...");
 
     isInitiator = true;
-
     createPeerConnection();
 
-
-    // Create DataChannel
-    dataChannel =
-        peerConnection.createDataChannel(
-            "b2b-transfer"
-        );
-
-
+    dataChannel = peerConnection.createDataChannel("b2b-transfer");
     setupDataChannel();
 
+    const offer = await peerConnection.createOffer();
 
-    const offer =
-        await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
 
+    console.log("Sending offer to peer...");
 
-    await peerConnection.setLocalDescription(
-        offer
-    );
-
-
-    console.log(
-        "Sending offer to peer..."
-    );
-
-
-    socket.emit(
-        "offer",
-        peerConnection.localDescription
-    );
-
+    socket.emit("offer", peerConnection.localDescription);
 }
 
 
@@ -172,43 +87,23 @@ async function createOffer() {
 // =========================
 
 async function handleOffer(offer) {
-
-    console.log(
-        "Received WebRTC offer."
-    );
-
+    console.log("Received WebRTC offer.");
 
     if (!peerConnection) {
-
         createPeerConnection();
-
     }
-
 
     await peerConnection.setRemoteDescription(
         new RTCSessionDescription(offer)
     );
 
+    const answer = await peerConnection.createAnswer();
 
-    const answer =
-        await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
 
+    console.log("Sending answer to peer...");
 
-    await peerConnection.setLocalDescription(
-        answer
-    );
-
-
-    console.log(
-        "Sending answer to peer..."
-    );
-
-
-    socket.emit(
-        "answer",
-        peerConnection.localDescription
-    );
-
+    socket.emit("answer", peerConnection.localDescription);
 }
 
 
@@ -217,16 +112,11 @@ async function handleOffer(offer) {
 // =========================
 
 async function handleAnswer(answer) {
-
-    console.log(
-        "Received WebRTC answer."
-    );
-
+    console.log("Received WebRTC answer.");
 
     await peerConnection.setRemoteDescription(
         new RTCSessionDescription(answer)
     );
-
 }
 
 
@@ -235,26 +125,15 @@ async function handleAnswer(answer) {
 // =========================
 
 async function handleIceCandidate(candidate) {
-
     try {
-
         if (peerConnection) {
-
             await peerConnection.addIceCandidate(
                 new RTCIceCandidate(candidate)
             );
-
         }
-
     } catch (error) {
-
-        console.error(
-            "Error adding ICE candidate:",
-            error
-        );
-
+        console.error("Error adding ICE candidate:", error);
     }
-
 }
 
 
@@ -263,79 +142,47 @@ async function handleIceCandidate(candidate) {
 // =========================
 
 function setupDataChannel() {
+    dataChannel.binaryType = "arraybuffer";
 
     dataChannel.onopen = () => {
+        console.log("🎉 DataChannel OPEN!");
 
-        console.log(
-            "🎉 DataChannel OPEN!"
-        );
-
-        updateStatus(
-            "🟢 Direct P2P connection ready!"
-        );
-
+        updateStatus("🟢 Direct P2P connection ready!");
         showTransferSection();
-
     };
-
 
     dataChannel.onclose = () => {
-
-        console.log(
-            "DataChannel closed."
-        );
-
+        console.log("DataChannel closed.");
+        updateStatus("🟡 P2P connection closed.");
     };
-
 
     dataChannel.onerror = (error) => {
-
-        console.error(
-            "DataChannel error:",
-            error
-        );
-
+        console.error("DataChannel error:", error);
+        updateStatus("🔴 P2P data channel error.");
     };
 
+    dataChannel.onmessage = (event) => {
+        console.log("Data received:", event.data);
 
-    dataChannel.onmessage = async (event) => {
+        // transfer.js serializes messages so file chunks and FILE_END
+        // cannot race each other while async disk writes are pending.
+        if (typeof enqueueIncomingMessage === "function") {
+            enqueueIncomingMessage(event.data);
+        } else if (typeof handleIncomingTransferMessage === "function") {
+            handleIncomingTransferMessage(event.data);
+        }
 
-    console.log(
-        "Data received:",
-        event.data
-    );
-
-
-    // Handle file transfer messages
-
-    if (
-        typeof handleIncomingTransferMessage ===
-        "function"
-    ) {
-
-        await handleIncomingTransferMessage(
-            event.data
-        );
-
-    }
-
-
-    // Keep the old test-message display
-
-    if (
-        typeof event.data === "string" &&
-        !event.data.startsWith("{")
-    ) {
-
-        displayReceivedMessage(
-            event.data
-        );
-
-    }
-
-};
-
+        // Keep the old test-message display.
+        if (
+            typeof event.data === "string" &&
+            !event.data.startsWith("{") &&
+            typeof displayReceivedMessage === "function"
+        ) {
+            displayReceivedMessage(event.data);
+        }
+    };
 }
+
 
 function sendTestMessage() {
     if (!dataChannel) {
@@ -344,18 +191,12 @@ function sendTestMessage() {
     }
 
     if (dataChannel.readyState !== "open") {
-        console.error(
-            "DataChannel is not open."
-        );
+        console.error("DataChannel is not open.");
         return;
     }
 
     const message = "Hello from B2B!🚀";
 
-    console.log(
-        "Sending:",
-        message
-    );
-
+    console.log("Sending:", message);
     dataChannel.send(message);
 }

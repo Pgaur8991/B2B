@@ -131,13 +131,14 @@ label:focus-visible {
 }
 
 .primary-btn,
-.secondary-btn {
+.secondary-btn,
+.danger-btn {
     min-height: 50px;
     padding: 0 22px;
     border-radius: 14px;
     cursor: pointer;
     font-weight: 700;
-    transition: transform .15s ease, filter .15s ease, background .15s ease;
+    transition: transform .15s ease, filter .15s ease, background .15s ease, opacity .15s ease;
 }
 
 .primary-btn {
@@ -152,11 +153,30 @@ label:focus-visible {
     border: 1px solid rgba(188, 201, 244, 0.22);
 }
 
+.danger-btn {
+    min-height: 38px;
+    padding: 0 14px;
+    color: #ffd8dc;
+    background: rgba(255, 92, 111, .12);
+    border: 1px solid rgba(255, 137, 151, .30);
+    font-size: .85rem;
+}
+
 .primary-btn:hover,
 .secondary-btn:hover,
-.icon-btn:hover {
+.danger-btn:hover,
+.icon-btn:hover,
+.file-remove-btn:hover {
     transform: translateY(-1px);
     filter: brightness(1.05);
+}
+
+.primary-btn:disabled,
+.secondary-btn:disabled,
+.danger-btn:disabled {
+    cursor: not-allowed;
+    opacity: .55;
+    transform: none;
 }
 
 .divider {
@@ -315,10 +335,64 @@ label:focus-visible {
 }
 
 .selected-files {
+    display: grid;
+    gap: 8px;
     margin: 18px auto 0;
-    max-width: 640px;
+    max-width: 680px;
     color: #dfe6fa;
     font-size: .9rem;
+    text-align: left;
+}
+
+.selected-files-empty {
+    color: #8f9abc;
+    text-align: center;
+}
+
+.file-list-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid rgba(180, 193, 231, .12);
+    border-radius: 12px;
+    background: rgba(8, 14, 31, .30);
+}
+
+.file-list-icon {
+    flex: 0 0 auto;
+    font-size: 1.1rem;
+}
+
+.file-list-info {
+    min-width: 0;
+    flex: 1;
+}
+
+.file-list-name {
+    overflow: hidden;
+    color: #f1f5ff;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-list-size {
+    margin-top: 3px;
+    color: #8f9abc;
+    font-size: .78rem;
+}
+
+.file-remove-btn {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    color: #ffd6dc;
+    background: rgba(255, 92, 111, .10);
+    border: 1px solid rgba(255, 137, 151, .20);
+    cursor: pointer;
 }
 
 .transfer-panel {
@@ -359,6 +433,13 @@ label:focus-visible {
     margin: 0 0 7px;
 }
 
+.transfer-heading-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+
 .muted {
     color: #aab5d3;
 }
@@ -384,11 +465,68 @@ label:focus-visible {
     transition: width .1s linear;
 }
 
+.progress-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.progress-meta p {
+    margin: 0;
+}
+
+#transfer-status {
+    margin-bottom: 0;
+}
+
+#transfer-status[data-status="success"] {
+    color: #8ff2bd;
+}
+
+#transfer-status[data-status="warning"] {
+    color: #ffd78a;
+}
+
+#transfer-status[data-status="error"] {
+    color: #ff9eaa;
+}
+
 .error-message {
     min-height: 24px;
     margin: 14px 4px 0;
     color: #ff9eaa;
     text-align: center;
+}
+
+.toast-container {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 1200;
+    display: grid;
+    gap: 10px;
+    width: min(360px, calc(100% - 40px));
+    pointer-events: none;
+}
+
+.toast {
+    padding: 13px 15px;
+    border: 1px solid rgba(190, 204, 245, .20);
+    border-radius: 13px;
+    background: rgba(20, 28, 56, .96);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .30);
+    color: #f5f8ff;
+    font-size: .9rem;
+    animation: toast-in .18s ease-out;
+}
+
+.toast.success { border-color: rgba(114, 241, 184, .35); }
+.toast.warning { border-color: rgba(255, 215, 138, .35); }
+.toast.error { border-color: rgba(255, 137, 151, .35); }
+
+@keyframes toast-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 .modal {
@@ -426,6 +564,13 @@ label:focus-visible {
     padding: 10px;
     border-radius: 14px;
     background: #fff;
+}
+
+.qr-loading {
+    display: grid;
+    place-items: center;
+    min-height: 240px;
+    color: #aeb8d4;
 }
 
 .modal-close {
@@ -486,5 +631,21 @@ label:focus-visible {
     .drop-zone {
         min-height: 290px;
         padding: 44px 18px;
+    }
+
+    .transfer-heading-row {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .progress-meta {
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .toast-container {
+        right: 12px;
+        bottom: 12px;
+        width: calc(100% - 24px);
     }
 }

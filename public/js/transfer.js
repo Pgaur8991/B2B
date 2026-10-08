@@ -10,6 +10,7 @@ let incomingMessageQueue = Promise.resolve();
 window.currentOutgoingFile = null;
 window.outgoingFileQueue = [];
 window.outgoingTransferBusy = false;
+window.outgoingTransferToken = 0;
 
 
 // ==========================================
@@ -71,7 +72,7 @@ if (sendFileButton) {
             return;
         }
 
-        // Take a snapshot so a later file-picker action cannot replace this batch.
+        window.outgoingTransferToken += 1;
         window.outgoingFileQueue = [...selectedFiles];
         window.outgoingTransferBusy = true;
 
@@ -94,6 +95,11 @@ async function sendNextQueuedFile() {
         return;
     }
 
+    if (!dataChannel || dataChannel.readyState !== "open") {
+        failOutgoingTransfer("Peer is no longer connected.");
+        return;
+    }
+
     const file = window.outgoingFileQueue.shift();
 
     if (!(file instanceof File)) {
@@ -101,7 +107,6 @@ async function sendNextQueuedFile() {
         return;
     }
 
-    // Keep the exact File object alive until its transfer is complete.
     window.currentOutgoingFile = {
         file,
         transferId: crypto.randomUUID()
@@ -189,8 +194,6 @@ async function prepareFileForWriting() {
 // ==========================================
 
 function enqueueIncomingMessage(message) {
-    // RTCDataChannel can fire multiple message events while an async write is pending.
-    // Serializing them prevents chunks and FILE_END from racing each other.
     incomingMessageQueue = incomingMessageQueue
         .then(() => handleIncomingTransferMessage(message))
         .catch((error) => {
@@ -268,7 +271,7 @@ function handleFileOffer(data) {
 // ==========================================
 
 async function handleFileAccepted(data) {
-    if (!window.currentOutgoingFile) {
+    if (!window.currentOutgoingFile || !window.outgoingTransferBusy) {
         return;
     }
 
@@ -279,7 +282,10 @@ async function handleFileAccepted(data) {
     console.log("Receiver accepted file.");
 
     try {
-        await startFileSending(window.currentOutgoingFile.file);
+        await startFileSending(
+            window.currentOutgoingFile.file,
+            window.currentOutgoingFile.transferId
+        );
     } catch (error) {
         console.error("File read/transfer error:", error);
         failOutgoingTransfer(
@@ -293,7 +299,7 @@ async function handleFileAccepted(data) {
 // SEND FILE CHUNKS
 // ==========================================
 
-async function startFileSending(file) {
+async function startFileSending(file, transferId) {
     console.log("Starting file transfer:", file.name);
 
     transferTitle.textContent = `Sending: ${file.name}`;
@@ -305,10 +311,20 @@ async function startFileSending(file) {
     const CHUNK_SIZE = 64 * 1024;
     const HIGH_WATER_MARK = 8 * 1024 * 1024;
     const LOW_WATER_MARK = 2 * 1024 * 1024;
+    const transferToken = window.outgoingTransferToken;
 
     dataChannel.bufferedAmountLowThreshold = LOW_WATER_MARK;
 
     for (let offset = 0; offset < file.size; offset += CHUNK_SIZE) {
+        if (
+            !window.outgoingTransferBusy ||
+            window.outgoingTransferToken !== transferToken ||
+            !window.currentOutgoingFile ||
+            window.currentOutgoingFile.transferId !== transferId
+        ) {
+            throw new Error("File transfer was cancelled.");
+        }
+
         if (!dataChannel || dataChannel.readyState !== "open") {
             throw new Error("P2P connection closed during file transfer.");
         }
@@ -316,8 +332,14 @@ async function startFileSending(file) {
         const end = Math.min(offset + CHUNK_SIZE, file.size);
         const chunk = await readFileChunkWithRetry(file, offset, end);
 
-        while (dataChannel.bufferedAmount > HIGH_WATER_MARK) {
-            await waitForBufferDrain();
+        if (!window.outgoingTransferBusy || window.outgoingTransferToken !== transferToken) {
+            throw new Error("File transfer was cancelled.");
+        }
+
+        await waitForBufferDrain(HIGH_WATER_MARK, transferToken);
+
+        if (!dataChannel || dataChannel.readyState !== "open") {
+            throw new Error("P2P connection closed during file transfer.");
         }
 
         dataChannel.send(chunk);
@@ -326,18 +348,27 @@ async function startFileSending(file) {
         updateProgress(bytesTransferred, file.size);
     }
 
+    if (!dataChannel || dataChannel.readyState !== "open") {
+        throw new Error("P2P connection closed before the file could finish.");
+    }
+
     dataChannel.send(JSON.stringify({
         type: "FILE_END",
-        transferId: window.currentOutgoingFile.transferId
+        transferId
     }));
 
-    transferStatus.textContent = "✅ File sent successfully";
     console.log("File transfer complete:", file.name);
 
     window.currentOutgoingFile = null;
 
-    // Give the receiver's ordered message queue a moment to process FILE_END
-    // before the next FILE_OFFER arrives.
+    if (window.outgoingFileQueue.length === 0) {
+        window.outgoingTransferBusy = false;
+        transferStatus.textContent = "✅ All selected files sent successfully";
+        return;
+    }
+
+    transferStatus.textContent = "Preparing next file...";
+
     setTimeout(() => {
         sendNextQueuedFile();
     }, 100);
@@ -383,22 +414,40 @@ function delay(ms) {
 // BUFFER DRAIN
 // ==========================================
 
-function waitForBufferDrain() {
-    return new Promise((resolve) => {
+function waitForBufferDrain(highWaterMark, transferToken) {
+    return new Promise((resolve, reject) => {
+        const startedAt = performance.now();
+        const TIMEOUT = 30000;
+
         const check = () => {
+            if (!window.outgoingTransferBusy || window.outgoingTransferToken !== transferToken) {
+                reject(new Error("File transfer was cancelled."));
+                return;
+            }
+
             if (!dataChannel || dataChannel.readyState !== "open") {
-                resolve();
+                reject(new Error("P2P connection closed during file transfer."));
                 return;
             }
 
             if (dataChannel.bufferedAmount <= 2 * 1024 * 1024) {
                 resolve();
-            } else {
-                setTimeout(check, 10);
+                return;
             }
+
+            if (performance.now() - startedAt > TIMEOUT) {
+                reject(new Error("P2P data channel stopped draining."));
+                return;
+            }
+
+            setTimeout(check, 10);
         };
 
-        check();
+        if (dataChannel.bufferedAmount <= highWaterMark) {
+            resolve();
+        } else {
+            check();
+        }
     });
 }
 
@@ -445,10 +494,20 @@ async function handleFileEnd(data) {
 
 
 // ==========================================
-// OUTGOING FAILURE
+// DISCONNECT / CANCEL
 // ==========================================
 
 function failOutgoingTransfer(message) {
+    const hasActiveTransfer =
+        window.outgoingTransferBusy ||
+        window.currentOutgoingFile ||
+        window.outgoingFileQueue.length > 0;
+
+    if (!hasActiveTransfer) {
+        return;
+    }
+
+    window.outgoingTransferToken += 1;
     window.currentOutgoingFile = null;
     window.outgoingFileQueue = [];
     window.outgoingTransferBusy = false;
@@ -456,6 +515,42 @@ function failOutgoingTransfer(message) {
     transferStatus.textContent = `❌ ${message}`;
     console.error("Outgoing transfer stopped:", message);
 }
+
+function resetOutgoingTransferState() {
+    if (!window.outgoingTransferBusy) {
+        window.currentOutgoingFile = null;
+        window.outgoingFileQueue = [];
+    }
+}
+
+async function handleIncomingTransferDisconnect() {
+    const hadIncomingTransfer = Boolean(currentIncomingFile || incomingFileWriter);
+
+    if (!hadIncomingTransfer) {
+        return;
+    }
+
+    try {
+        if (incomingFileWriter && typeof incomingFileWriter.abort === "function") {
+            await incomingFileWriter.abort();
+        }
+    } catch (error) {
+        console.warn("Could not abort incomplete incoming file:", error);
+    }
+
+    incomingFileWriter = null;
+    currentIncomingFile = null;
+
+    if (incomingFileSection) {
+        incomingFileSection.classList.add("hidden");
+    }
+
+    transferStatus.textContent = "❌ File transfer interrupted because the peer disconnected.";
+}
+
+window.failOutgoingTransfer = failOutgoingTransfer;
+window.resetOutgoingTransferState = resetOutgoingTransferState;
+window.handleIncomingTransferDisconnect = handleIncomingTransferDisconnect;
 
 
 // ==========================================

@@ -7,6 +7,59 @@
     <link rel="icon" href="data:,">
     <title>B2B - Browser to Browser</title>
     <link rel="stylesheet" href="/style.css">
+    <style>
+        .join-row {
+            grid-template-columns: 1fr 150px 170px;
+        }
+        .scan-btn {
+            white-space: nowrap;
+        }
+        .scanner-card {
+            width: min(100%, 420px);
+        }
+        .scanner-video-wrap {
+            position: relative;
+            overflow: hidden;
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            margin: 16px 0;
+            border-radius: 18px;
+            background: #050812;
+            border: 1px solid rgba(188, 201, 244, 0.2);
+        }
+        .scanner-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .scanner-frame {
+            position: absolute;
+            inset: 18%;
+            border: 3px solid #8de3ff;
+            border-radius: 18px;
+            box-shadow: 0 0 0 999px rgba(0,0,0,.18);
+            pointer-events: none;
+        }
+        .scanner-status {
+            min-height: 22px;
+            margin: 8px 0 0;
+            color: #aeb8d4;
+            font-size: .9rem;
+        }
+        .scanner-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        @media (max-width: 760px) {
+            .join-row {
+                grid-template-columns: 1fr;
+            }
+            .scan-btn {
+                width: 100%;
+            }
+        }
+    </style>
 </head>
 <body>
     <main class="app-shell">
@@ -41,7 +94,9 @@
                         spellcheck="false"
                     >
                     <button id="join-room-btn" class="secondary-btn" type="button">Join Room</button>
+                    <button id="scan-connect-btn" class="secondary-btn scan-btn" type="button">📷 Scan to Connect</button>
                 </div>
+                <p class="muted" style="margin:12px 0 0; font-size:.85rem;">Paste a room code and press Enter, or scan a room QR code.</p>
             </div>
         </section>
 
@@ -134,12 +189,31 @@
             <h2>Room <span id="qr-room-code"></span></h2>
             <div id="qr-loading" class="qr-loading">Generating QR code...</div>
             <canvas id="qr-canvas" width="240" height="240" aria-label="Room QR code"></canvas>
-            <p class="muted">Scan this QR code on another browser.</p>
+            <p class="muted">Scan this QR code with your phone's camera to open B2B and join this room automatically.</p>
+            <p class="muted" style="font-size:.78rem;">For phone-to-laptop testing on the same Wi-Fi, open B2B on the laptop using its local network IP instead of localhost.</p>
+        </div>
+    </div>
+
+    <div id="scanner-modal" class="modal hidden" aria-hidden="true">
+        <div class="modal-card scanner-card">
+            <button id="close-scanner-btn" class="modal-close" type="button" aria-label="Close">×</button>
+            <span class="eyebrow">SCAN TO CONNECT</span>
+            <h2>Scan room QR</h2>
+            <div class="scanner-video-wrap">
+                <video id="scanner-video" class="scanner-video" playsinline muted></video>
+                <div class="scanner-frame"></div>
+            </div>
+            <p id="scanner-status" class="scanner-status">Point your camera at the room QR code.</p>
+            <div class="scanner-actions">
+                <button id="start-scanner-btn" class="primary-btn" type="button">Start Camera</button>
+                <button id="close-scanner-action-btn" class="secondary-btn" type="button">Cancel</button>
+            </div>
         </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
     <script src="/js/signaling.js"></script>
     <script src="/js/webrtc.js"></script>
     <script src="/js/transfer.js"></script>

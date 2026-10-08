@@ -1,37 +1,37 @@
-const transferSection = document.getElementById("transfer-section");
-const createRoomButton = document.getElementById("create-room-btn");
-const joinRoomButton = document.getElementById("join-room-btn");
-const roomCodeInput = document.getElementById("room-code-input");
-const homeScreen = document.getElementById("home-screen");
-const roomScreen = document.getElementById("room-screen");
-const roomCodeDisplay = document.getElementById("room-code");
-const connectionStatus = document.getElementById("connection-status");
-const roomStatusText = document.getElementById("room-status-text");
-const errorMessage = document.getElementById("error-message");
-const copyRoomButton = document.getElementById("copy-room-btn");
-const qrRoomButton = document.getElementById("qr-room-btn");
-const qrModal = document.getElementById("qr-modal");
-const qrCanvas = document.getElementById("qr-canvas");
-const qrRoomCode = document.getElementById("qr-room-code");
-const closeQrButton = document.getElementById("close-qr-btn");
-const fileInput = document.getElementById("file-input");
-const selectedFiles = document.getElementById("selected-files");
-const dropZone = document.getElementById("drop-zone");
+const appTransferSection = document.getElementById("transfer-section");
+const appCreateRoomButton = document.getElementById("create-room-btn");
+const appJoinRoomButton = document.getElementById("join-room-btn");
+const appRoomCodeInput = document.getElementById("room-code-input");
+const appHomeScreen = document.getElementById("home-screen");
+const appRoomScreen = document.getElementById("room-screen");
+const appRoomCodeDisplay = document.getElementById("room-code");
+const appConnectionStatus = document.getElementById("connection-status");
+const appRoomStatusText = document.getElementById("room-status-text");
+const appErrorMessage = document.getElementById("error-message");
+const appCopyRoomButton = document.getElementById("copy-room-btn");
+const appQrRoomButton = document.getElementById("qr-room-btn");
+const appQrModal = document.getElementById("qr-modal");
+const appQrCanvas = document.getElementById("qr-canvas");
+const appQrRoomCode = document.getElementById("qr-room-code");
+const appCloseQrButton = document.getElementById("close-qr-btn");
+const appFileInput = document.getElementById("file-input");
+const appSelectedFiles = document.getElementById("selected-files");
+const appDropZone = document.getElementById("drop-zone");
 
 function clearError() {
-    if (errorMessage) errorMessage.textContent = "";
+    if (appErrorMessage) appErrorMessage.textContent = "";
 }
 
 function showError(message) {
-    if (errorMessage) errorMessage.textContent = message;
+    if (appErrorMessage) appErrorMessage.textContent = message;
     console.error("B2B:", message);
 }
 
 window.clearError = clearError;
 window.showError = showError;
 
-if (createRoomButton) {
-    createRoomButton.addEventListener("click", () => {
+if (appCreateRoomButton) {
+    appCreateRoomButton.addEventListener("click", () => {
         clearError();
         console.log("B2B: Create Room clicked");
 
@@ -43,11 +43,11 @@ if (createRoomButton) {
     });
 }
 
-if (joinRoomButton) {
-    joinRoomButton.addEventListener("click", () => {
+if (appJoinRoomButton) {
+    appJoinRoomButton.addEventListener("click", () => {
         clearError();
 
-        const roomCode = roomCodeInput?.value.trim().toUpperCase() || "";
+        const roomCode = appRoomCodeInput?.value.trim().toUpperCase() || "";
 
         if (roomCode.length !== 6) {
             showError("Please enter a valid 6-character room code.");
@@ -65,39 +65,37 @@ if (joinRoomButton) {
 window.showRoom = function showRoom(code) {
     console.log("B2B: Showing room", code);
 
-    if (!homeScreen || !roomScreen || !roomCodeDisplay) {
+    if (!appHomeScreen || !appRoomScreen || !appRoomCodeDisplay) {
         showError("Room screen UI is missing. Please refresh the page.");
         return;
     }
 
-    homeScreen.classList.add("hidden");
-    roomScreen.classList.remove("hidden");
-    roomCodeDisplay.textContent = code;
+    appHomeScreen.classList.add("hidden");
+    appRoomScreen.classList.remove("hidden");
+    appRoomCodeDisplay.textContent = code;
 
-    if (roomStatusText) {
-        roomStatusText.textContent = "Waiting for another browser...";
+    if (appRoomStatusText) {
+        appRoomStatusText.textContent = "Waiting for another browser...";
     }
 };
 
 window.updateStatus = function updateStatus(message) {
-    if (connectionStatus) connectionStatus.textContent = message;
+    if (appConnectionStatus) appConnectionStatus.textContent = message;
 
-    if (roomStatusText && message.includes("Direct P2P connection ready")) {
-        roomStatusText.textContent = message;
+    if (appRoomStatusText && message.includes("P2P connection")) {
+        appRoomStatusText.textContent = message;
     }
 };
 
-if (copyRoomButton) {
-    copyRoomButton.addEventListener("click", async () => {
-        const code = roomCodeDisplay?.textContent.trim() || "";
-
+if (appCopyRoomButton) {
+    appCopyRoomButton.addEventListener("click", async () => {
+        const code = appRoomCodeDisplay?.textContent.trim() || "";
         if (!code || code === "------") return;
 
         try {
             await navigator.clipboard.writeText(code);
-            const label = copyRoomButton.querySelector(".copy-label");
+            const label = appCopyRoomButton.querySelector(".copy-label");
             if (label) label.textContent = "Copied";
-
             setTimeout(() => {
                 if (label) label.textContent = "Copy";
             }, 1500);
@@ -109,8 +107,7 @@ if (copyRoomButton) {
 }
 
 function openQrModal() {
-    const code = roomCodeDisplay?.textContent.trim() || "";
-
+    const code = appRoomCodeDisplay?.textContent.trim() || "";
     if (!code || code === "------") return;
 
     if (!window.QRCode) {
@@ -118,9 +115,9 @@ function openQrModal() {
         return;
     }
 
-    qrRoomCode.textContent = code;
+    appQrRoomCode.textContent = code;
 
-    QRCode.toCanvas(qrCanvas, code, {
+    window.QRCode.toCanvas(appQrCanvas, code, {
         width: 220,
         margin: 2,
         errorCorrectionLevel: "M"
@@ -131,74 +128,70 @@ function openQrModal() {
             return;
         }
 
-        qrModal?.classList.remove("hidden");
-        qrModal?.setAttribute("aria-hidden", "false");
+        appQrModal?.classList.remove("hidden");
+        appQrModal?.setAttribute("aria-hidden", "false");
     });
 }
 
-if (qrRoomButton) {
-    qrRoomButton.addEventListener("click", openQrModal);
-}
+if (appQrRoomButton) appQrRoomButton.addEventListener("click", openQrModal);
 
 function closeQrModal() {
-    qrModal?.classList.add("hidden");
-    qrModal?.setAttribute("aria-hidden", "true");
+    appQrModal?.classList.add("hidden");
+    appQrModal?.setAttribute("aria-hidden", "true");
 }
 
-if (closeQrButton) closeQrButton.addEventListener("click", closeQrModal);
+if (appCloseQrButton) appCloseQrButton.addEventListener("click", closeQrModal);
 
-if (qrModal) {
-    qrModal.addEventListener("click", (event) => {
-        if (event.target === qrModal) closeQrModal();
+if (appQrModal) {
+    appQrModal.addEventListener("click", (event) => {
+        if (event.target === appQrModal) closeQrModal();
     });
 }
 
 window.showTransferSection = function showTransferSection() {
-    transferSection?.classList.remove("hidden");
+    appTransferSection?.classList.remove("hidden");
 };
 
-if (fileInput) {
-    fileInput.addEventListener("change", () => {
-        const files = Array.from(fileInput.files || []);
-
-        if (!selectedFiles) return;
+if (appFileInput) {
+    appFileInput.addEventListener("change", () => {
+        const files = Array.from(appFileInput.files || []);
+        if (!appSelectedFiles) return;
 
         if (!files.length) {
-            selectedFiles.textContent = "";
+            appSelectedFiles.textContent = "";
             return;
         }
 
-        selectedFiles.textContent =
-            files.length === 1
-                ? `Selected: ${files[0].name}`
-                : `${files.length} files selected`;
+        appSelectedFiles.textContent = files.length === 1
+            ? `Selected: ${files[0].name}`
+            : `${files.length} files selected`;
     });
 }
 
-if (dropZone && fileInput) {
+if (appDropZone && appFileInput) {
     ["dragenter", "dragover"].forEach((eventName) => {
-        dropZone.addEventListener(eventName, (event) => {
+        appDropZone.addEventListener(eventName, (event) => {
             event.preventDefault();
-            dropZone.classList.add("dragover");
+            appDropZone.classList.add("dragover");
         });
     });
 
     ["dragleave", "drop"].forEach((eventName) => {
-        dropZone.addEventListener(eventName, (event) => {
+        appDropZone.addEventListener(eventName, (event) => {
             event.preventDefault();
-            dropZone.classList.remove("dragover");
+            appDropZone.classList.remove("dragover");
         });
     });
 
-    dropZone.addEventListener("drop", (event) => {
+    appDropZone.addEventListener("drop", (event) => {
         const files = event.dataTransfer?.files;
         if (!files?.length) return;
 
         try {
             const dataTransfer = new DataTransfer();
             Array.from(files).forEach((file) => dataTransfer.items.add(file));
-            fileInput.files = dataTransfer.files;
-            fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+            appFileInput.files = dataTransfer.files;
+            appFileInput.dispatchEvent(new Event("change", { bubbles: true }));
         } catch (error) {
             console.error("B2B: Could not load dropped files", error);
         }

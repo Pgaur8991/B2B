@@ -1,171 +1,140 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
+    <meta name="theme-color" content="#0a1023">
+    <link rel="icon" href="data:,">
     <title>B2B - Browser to Browser</title>
-
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/style.css">
 </head>
-
 <body>
-
-    <main class="container">
-
-        <h1>B2B</h1>
-
-        <p class="subtitle">
-            Browser to Browser Transfer
-        </p>
-
-        <!-- Create Room -->
-
-        <section id="home-screen">
-
-            <button id="create-room-btn">
-                Create Room
-            </button>
-
-            <div class="divider">
-                OR
+    <main class="app-shell">
+        <header class="app-header">
+            <div>
+                <div class="brand">B2B</div>
+                <p class="subtitle">Browser to Browser Transfer</p>
             </div>
+            <div id="connection-indicator" class="connection-indicator">
+                <span class="status-dot"></span>
+                <span id="connection-status">Connecting...</span>
+            </div>
+        </header>
 
-            <input
-                type="text"
-                id="room-code-input"
-                placeholder="Enter Room Code"
-                maxlength="6"
-            >
+        <section id="home-screen" class="panel home-panel">
+            <div class="hero-icon">🚀</div>
+            <h1>Transfer files directly</h1>
+            <p class="hero-text">Fast peer-to-peer file sharing between browsers.</p>
 
-            <button id="join-room-btn">
-                Join Room
-            </button>
+            <div class="room-actions-home">
+                <button id="create-room-btn" class="primary-btn" type="button">Create Room</button>
 
+                <div class="divider"><span>OR</span></div>
+
+                <div class="join-row">
+                    <input
+                        type="text"
+                        id="room-code-input"
+                        placeholder="Enter room code"
+                        maxlength="6"
+                        autocomplete="off"
+                        spellcheck="false"
+                    >
+                    <button id="join-room-btn" class="secondary-btn" type="button">Join Room</button>
+                </div>
+            </div>
         </section>
-
-
-        <!-- Room Screen -->
 
         <section id="room-screen" class="hidden">
+            <div class="panel room-card">
+                <div class="room-code-block">
+                    <div>
+                        <span class="eyebrow">ROOM CODE</span>
+                        <div id="room-code" class="room-code">------</div>
+                    </div>
 
-            <p>Your Room Code</p>
-
-            <div id="room-code">
-                ------
+                    <div class="room-actions">
+                        <button id="copy-room-btn" class="icon-btn" type="button" title="Copy room code" aria-label="Copy room code">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <rect x="8" y="8" width="11" height="11" rx="2"></rect>
+                                <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
+                            </svg>
+                            <span class="copy-label">Copy</span>
+                        </button>
+                        <button id="qr-room-btn" class="icon-btn" type="button" title="Show QR code" aria-label="Show QR code">
+                            <span class="qr-mark">QR</span>
+                        </button>
+                    </div>
+                </div>
             </div>
 
-            <button id="copy-room-btn">
-                Copy Room Code
-            </button>
-
-            <p id="connection-status">
-                Waiting for another browser...
-            </p>
-
-
-            <!-- Transfer Area -->
+            <div class="connection-message">
+                <span class="status-dot ready-dot"></span>
+                <span id="room-status-text">Waiting for another browser...</span>
+            </div>
 
             <div id="transfer-section" class="hidden">
+                <div class="drop-zone" id="drop-zone">
+                    <div class="folder-icon">📁</div>
+                    <h2>Drop files here</h2>
+                    <p>or click to browse</p>
 
-                <div class="transfer-card">
+                    <input type="file" id="file-input" multiple hidden>
+                    <label for="file-input" class="primary-btn file-btn">Select Files</label>
 
-                    <h2>Send Files</h2>
-
-                    <input
-                        type="file"
-                        id="file-input"
-                        multiple
-                    >
-
-                    <button id="send-file-btn">
-                        Send Selected Files
-                    </button>
-
+                    <div id="selected-files" class="selected-files"></div>
                 </div>
 
-
-                <!-- Incoming File -->
-
-                <div
-                    id="incoming-file-section"
-                    class="hidden"
-                >
-
-                    <h2>Incoming File</h2>
-
-                    <div id="incoming-file-name">
-                        File
+                <div class="panel transfer-panel">
+                    <div class="section-heading">
+                        <h2>Transfers</h2>
+                        <span class="transfer-badge">P2P</span>
                     </div>
 
-                    <div id="incoming-file-size">
-                        0 MB
+                    <div class="transfer-card">
+                        <h3>Send files</h3>
+                        <p class="muted">Choose one or more files and send them directly to the connected browser.</p>
+                        <button id="send-file-btn" class="primary-btn" type="button">Send Selected Files</button>
                     </div>
 
-                    <button id="accept-file-btn">
-                        Accept & Save
-                    </button>
+                    <div id="incoming-file-section" class="transfer-card hidden">
+                        <h3>Incoming file</h3>
+                        <div id="incoming-file-name">File</div>
+                        <div id="incoming-file-size">0 MB</div>
+                        <button id="accept-file-btn" class="primary-btn" type="button">Accept &amp; Save</button>
+                    </div>
 
+                    <div id="transfer-progress-section" class="transfer-card hidden">
+                        <h3 id="transfer-title">Transfer</h3>
+                        <div class="progress-container">
+                            <div id="progress-bar" class="progress-bar"></div>
+                        </div>
+                        <p id="progress-text">0%</p>
+                        <p id="transfer-speed">Speed: 0 MB/s</p>
+                        <p id="transfer-status">Waiting...</p>
+                    </div>
                 </div>
-
-
-                <!-- Transfer Progress -->
-
-                <div
-                    id="transfer-progress-section"
-                    class="hidden"
-                >
-
-                    <h2 id="transfer-title">
-                        Transfer
-                    </h2>
-
-                    <div class="progress-container">
-
-                        <div
-                            id="progress-bar"
-                            class="progress-bar"
-                        ></div>
-
-                    </div>
-
-                    <p id="progress-text">
-                        0%
-                    </p>
-
-                    <p id="transfer-speed">
-                        Speed: 0 MB/s
-                    </p>
-
-                    <p id="transfer-status">
-                        Waiting...
-                    </p>
-
-                </div>
-
-
             </div>
-
         </section>
 
-
-        <!-- Error -->
-
-        <p id="error-message"></p>
-
+        <p id="error-message" class="error-message" role="alert"></p>
     </main>
 
+    <div id="qr-modal" class="modal hidden" aria-hidden="true">
+        <div class="modal-card">
+            <button id="close-qr-btn" class="modal-close" type="button" aria-label="Close">×</button>
+            <span class="eyebrow">SCAN TO JOIN</span>
+            <h2>Room <span id="qr-room-code"></span></h2>
+            <canvas id="qr-canvas" width="240" height="240"></canvas>
+            <p class="muted">Scan this QR code on another browser.</p>
+        </div>
+    </div>
 
-    <!-- Socket.IO client -->
     <script src="/socket.io/socket.io.js"></script>
-
-    <!-- B2B JavaScript -->
-    <script src="js/signaling.js"></script>
-    <script src="js/webrtc.js"></script>
-    <script src="js/transfer.js"></script>
-    <script src="js/app.js"></script>
-
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+    <script src="/js/signaling.js"></script>
+    <script src="/js/webrtc.js"></script>
+    <script src="/js/transfer.js"></script>
+    <script src="/js/app.js"></script>
 </body>
-
 </html>

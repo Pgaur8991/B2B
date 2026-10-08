@@ -2,6 +2,9 @@ let selectedFiles = [];
 let currentIncomingFile = null;
 let incomingFileWriter = null;
 let incomingDirectoryHandle = null;
+let incomingSaveMode = "none";
+let incomingFallbackChunks = [];
+let incomingFallbackBytes = 0;
 let incomingBatchId = null;
 let incomingBatchTotal = 1;
 let incomingBatchAccepted = false;
@@ -139,33 +142,59 @@ async function acceptIncomingBatch() {
     if (!currentIncomingFile) return;
     incomingBatchId = currentIncomingFile.batchId || currentIncomingFile.transferId;
     incomingBatchTotal = currentIncomingFile.batchTotal || 1;
+    incomingBatchAccepted = true;
 
-    if (incomingBatchTotal > 1 && "showDirectoryPicker" in window) {
+    const secure = Boolean(window.isSecureContext);
+    incomingDirectoryHandle = null;
+    incomingSaveMode = "memory";
+
+    if (secure && incomingBatchTotal > 1 && "showDirectoryPicker" in window) {
         incomingDirectoryHandle = await window.showDirectoryPicker({ mode: "readwrite" });
-        incomingBatchAccepted = true;
-    } else if ("showSaveFilePicker" in window) {
-        incomingDirectoryHandle = null;
-        incomingBatchAccepted = false;
+        incomingSaveMode = "directory";
+    } else if (secure && "showSaveFilePicker" in window) {
+        incomingSaveMode = "picker";
+    } else if (secure && navigator.storage?.getDirectory) {
+        incomingSaveMode = "opfs";
     } else {
-        throw new Error("File System Access API is not supported.");
+        incomingSaveMode = "memory";
     }
+
+    if (incomingSaveMode === "memory") {
+        setTransferStatus("idle", "Accepted. The browser will prepare a download when the file finishes.");
+    } else if (incomingSaveMode === "opfs") {
+        setTransferStatus("idle", "Accepted. Saving locally, then preparing the download.");
+    }
+
     await prepareCurrentIncomingFile();
 }
 
 async function prepareCurrentIncomingFile() {
     if (!currentIncomingFile || incomingFileWriter) return;
-    if (incomingDirectoryHandle) {
+
+    incomingFallbackChunks = [];
+    incomingFallbackBytes = 0;
+
+    if (incomingSaveMode === "directory" && incomingDirectoryHandle) {
         const fileHandle = await incomingDirectoryHandle.getFileHandle(currentIncomingFile.name, { create: true });
         incomingFileWriter = await fileHandle.createWritable();
-    } else {
+    } else if (incomingSaveMode === "picker") {
         const fileHandle = await window.showSaveFilePicker({ suggestedName: currentIncomingFile.name });
         incomingFileWriter = await fileHandle.createWritable();
+    } else if (incomingSaveMode === "opfs") {
+        const root = await navigator.storage.getDirectory();
+        const b2bDir = await root.getDirectoryHandle("b2b-transfers", { create: true });
+        const batchDir = await b2bDir.getDirectoryHandle(incomingBatchId, { create: true });
+        const safeName = currentIncomingFile.name.replace(/[\\/:*?"<>|]/g, "_");
+        const fileHandle = await batchDir.getFileHandle(`${currentIncomingFile.batchIndex || 0}-${safeName}`, { create: true });
+        incomingFileWriter = await fileHandle.createWritable();
     }
+
     if (!isDataChannelOpen()) {
         await safeAbortWriter();
         setTransferStatus("warning", "Peer disconnected before the transfer started.");
         return;
     }
+
     dataChannel.send(JSON.stringify({
         type: "FILE_ACCEPT",
         transferId: currentIncomingFile.transferId,
@@ -207,7 +236,7 @@ async function handleIncomingTransferMessage(message) {
 function handleFileOffer(data) {
     if (incomingBatchAccepted && incomingBatchId === data.batchId && !incomingFileWriter && !currentIncomingFile) {
         currentIncomingFile = data;
-        prepareCurrentIncomingFile().catch(() => finishIncomingCancellation("Could not continue the batch transfer."));
+        prepareCurrentIncomingFile().catch((error) => finishIncomingCancellation(error?.message || "Could not continue the batch transfer."));
         return;
     }
     if (currentIncomingFile || incomingFileWriter) {
@@ -302,27 +331,69 @@ function waitForBufferDrain(highWaterMark, transferToken) {
 }
 
 async function writeIncomingChunk(chunk) {
-    if (!incomingFileWriter || !currentIncomingFile) return;
-    try { await incomingFileWriter.write(chunk); }
-    catch (error) {
+    if (!currentIncomingFile) return;
+    try {
+        if (incomingFileWriter) await incomingFileWriter.write(chunk);
+        else incomingFallbackChunks.push(chunk);
+    } catch (error) {
         console.error("Could not write incoming file chunk:", error);
         await safeAbortWriter();
         currentIncomingFile = null;
+        incomingFallbackChunks = [];
+        incomingFallbackBytes = 0;
         setTransferStatus("error", "Could not write the received file.");
         updateTransferControls();
         return;
     }
+    incomingFallbackBytes += incomingFileWriter ? 0 : chunk.byteLength;
     bytesTransferred += chunk.byteLength;
     updateProgress(bytesTransferred, currentIncomingFile.size);
 }
 
+async function finishFallbackDownload(fileMeta) {
+    if (!incomingFallbackChunks.length) throw new Error("No file data was received.");
+    const blob = new Blob(incomingFallbackChunks, { type: fileMeta.mimeType || "application/octet-stream" });
+    incomingFallbackChunks = [];
+    incomingFallbackBytes = 0;
+    const url = URL.createObjectURL(blob);
+    const actions = document.getElementById("received-files-actions") || createReceivedFilesActions();
+    actions.classList.remove("hidden");
+    const row = document.createElement("div");
+    row.className = "received-file-row";
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileMeta.name;
+    link.className = "primary-btn received-file-link";
+    link.textContent = `⬇ Download ${fileMeta.name}`;
+    row.appendChild(link);
+    actions.appendChild(row);
+    setTimeout(() => {
+        try { link.click(); } catch {}
+    }, 0);
+    return blob.size;
+}
+
+function createReceivedFilesActions() {
+    const el = document.createElement("div");
+    el.id = "received-files-actions";
+    el.className = "received-files-actions hidden";
+    el.innerHTML = '<strong>Received files</strong><p>Tap a file below if your browser blocked automatic download.</p>';
+    transferProgressSection?.appendChild(el);
+    return el;
+}
+
 async function handleFileEnd(data) {
-    if (!incomingFileWriter || !currentIncomingFile || data.transferId !== currentIncomingFile.transferId) return;
+    if (!currentIncomingFile || data.transferId !== currentIncomingFile.transferId) return;
+    const finishedFile = { ...currentIncomingFile };
     const finishedIndex = currentIncomingFile.batchIndex || 0;
     const total = currentIncomingFile.batchTotal || 1;
     try {
-        await incomingFileWriter.close();
-        incomingFileWriter = null;
+        if (incomingFileWriter) {
+            await incomingFileWriter.close();
+            incomingFileWriter = null;
+        } else {
+            await finishFallbackDownload(finishedFile);
+        }
         currentIncomingFile = null;
         updateTransferControls();
         if (incomingBatchAccepted && incomingBatchId && finishedIndex + 1 < total) {
@@ -330,15 +401,20 @@ async function handleFileEnd(data) {
         } else {
             incomingBatchAccepted = false;
             incomingDirectoryHandle = null;
+            incomingSaveMode = "none";
             incomingBatchId = null;
             setTransferStatus("success", total > 1 ? `All ${total} files received successfully` : "File received successfully");
         }
     } catch (error) {
         console.error("Could not finalize incoming file:", error);
         await safeAbortWriter();
+        incomingFallbackChunks = [];
+        incomingFallbackBytes = 0;
         currentIncomingFile = null;
         incomingBatchAccepted = false;
         incomingDirectoryHandle = null;
+        incomingSaveMode = "none";
+        incomingBatchId = null;
         setTransferStatus("error", "Could not finish saving the received file.");
         updateTransferControls();
     }
@@ -399,9 +475,12 @@ async function safeAbortWriter() {
 }
 async function finishIncomingCancellation(message) {
     await safeAbortWriter();
+    incomingFallbackChunks = [];
+    incomingFallbackBytes = 0;
     currentIncomingFile = null;
     incomingBatchAccepted = false;
     incomingDirectoryHandle = null;
+    incomingSaveMode = "none";
     incomingBatchId = null;
     incomingFileSection?.classList.add("hidden");
     updateTransferControls();
@@ -414,9 +493,12 @@ async function handleRemoteTransferCancel(data) {
 async function handleIncomingTransferDisconnect() {
     if (!(currentIncomingFile || incomingFileWriter)) return;
     await safeAbortWriter();
+    incomingFallbackChunks = [];
+    incomingFallbackBytes = 0;
     currentIncomingFile = null;
     incomingBatchAccepted = false;
     incomingDirectoryHandle = null;
+    incomingSaveMode = "none";
     incomingBatchId = null;
     incomingFileSection?.classList.add("hidden");
     updateTransferControls();

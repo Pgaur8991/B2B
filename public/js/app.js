@@ -2,6 +2,7 @@ const appTransferSection = document.getElementById("transfer-section");
 const appCreateRoomButton = document.getElementById("create-room-btn");
 const appJoinRoomButton = document.getElementById("join-room-btn");
 const appRoomCodeInput = document.getElementById("room-code-input");
+const appScanConnectButton = document.getElementById("scan-connect-btn");
 const appHomeScreen = document.getElementById("home-screen");
 const appRoomScreen = document.getElementById("room-screen");
 const appRoomCodeDisplay = document.getElementById("room-code");
@@ -19,6 +20,19 @@ const appToastContainer = document.getElementById("toast-container");
 const appFileInput = document.getElementById("file-input");
 const appSelectedFiles = document.getElementById("selected-files");
 const appDropZone = document.getElementById("drop-zone");
+
+const scannerModal = document.getElementById("scanner-modal");
+const scannerVideo = document.getElementById("scanner-video");
+const scannerStatus = document.getElementById("scanner-status");
+const startScannerButton = document.getElementById("start-scanner-btn");
+const closeScannerButton = document.getElementById("close-scanner-btn");
+const closeScannerActionButton = document.getElementById("close-scanner-action-btn");
+
+let scannerStream = null;
+let scannerRunning = false;
+let scannerAnimationFrame = null;
+let scannerCanvas = null;
+let scannerCanvasContext = null;
 
 function clearError() {
     if (appErrorMessage) appErrorMessage.textContent = "";
@@ -41,6 +55,25 @@ window.showToast = function showToast(type, message) {
     setTimeout(() => toast.remove(), 3200);
 };
 
+function joinWithCode(roomCode) {
+    const normalizedCode = String(roomCode || "").trim().toUpperCase();
+    if (normalizedCode.length !== 6) {
+        showError("Please enter a valid 6-character room code.");
+        return false;
+    }
+
+    clearError();
+    if (appRoomCodeInput) appRoomCodeInput.value = normalizedCode;
+
+    if (typeof window.joinRoom === "function") {
+        window.joinRoom(normalizedCode);
+        return true;
+    }
+
+    showError("Signaling code is not loaded. Refresh the page.");
+    return false;
+}
+
 if (appCreateRoomButton) {
     appCreateRoomButton.addEventListener("click", () => {
         clearError();
@@ -51,14 +84,24 @@ if (appCreateRoomButton) {
 
 if (appJoinRoomButton) {
     appJoinRoomButton.addEventListener("click", () => {
-        clearError();
-        const roomCode = appRoomCodeInput?.value.trim().toUpperCase() || "";
-        if (roomCode.length !== 6) {
-            showError("Please enter a valid 6-character room code.");
-            return;
+        joinWithCode(appRoomCodeInput?.value || "");
+    });
+}
+
+// Press Enter after pasting/typing a room code.
+if (appRoomCodeInput) {
+    appRoomCodeInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            joinWithCode(appRoomCodeInput.value);
         }
-        if (typeof window.joinRoom === "function") window.joinRoom(roomCode);
-        else showError("Signaling code is not loaded. Refresh the page.");
+    });
+
+    appRoomCodeInput.addEventListener("input", () => {
+        appRoomCodeInput.value = appRoomCodeInput.value
+            .replace(/[^a-zA-Z0-9]/g, "")
+            .slice(0, 6)
+            .toUpperCase();
     });
 }
 
@@ -94,6 +137,14 @@ if (appCopyRoomButton) {
     });
 }
 
+function getJoinUrl(code) {
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.hash = "";
+    url.searchParams.set("room", code);
+    return url.toString();
+}
+
 function showQrImage(url) {
     let image = document.getElementById("qr-image");
     if (!image) {
@@ -116,6 +167,8 @@ function openQrModal() {
     const code = appRoomCodeDisplay?.textContent.trim() || "";
     if (!code || code === "------") return;
 
+    const joinUrl = getJoinUrl(code);
+
     appQrRoomCode.textContent = code;
     appQrCanvas?.classList.add("hidden");
     appQrLoading?.classList.remove("hidden");
@@ -126,14 +179,14 @@ function openQrModal() {
     existingImage?.classList.add("hidden");
 
     if (window.QRCode?.toCanvas) {
-        window.QRCode.toCanvas(appQrCanvas, code, {
+        window.QRCode.toCanvas(appQrCanvas, joinUrl, {
             width: 220,
             margin: 2,
             errorCorrectionLevel: "M"
         }, (error) => {
             if (error) {
                 console.warn("B2B: local QR generation failed, using fallback.", error);
-                showQrImage(`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(code)}`);
+                showQrImage(`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(joinUrl)}`);
                 return;
             }
             appQrLoading?.classList.add("hidden");
@@ -142,8 +195,7 @@ function openQrModal() {
         return;
     }
 
-    // Fallback for browsers/networks where the CDN QR library did not load.
-    showQrImage(`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(code)}`);
+    showQrImage(`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(joinUrl)}`);
 }
 
 if (appQrRoomButton) appQrRoomButton.addEventListener("click", openQrModal);
@@ -158,6 +210,161 @@ if (appQrModal) {
     appQrModal.addEventListener("click", (event) => {
         if (event.target === appQrModal) closeQrModal();
     });
+}
+
+function extractRoomCode(rawValue) {
+    const value = String(rawValue || "").trim();
+    if (!value) return null;
+
+    try {
+        const url = new URL(value);
+        const code = url.searchParams.get("room");
+        if (code) return code.trim().toUpperCase();
+    } catch {
+        // QR may contain the raw room code instead of a URL.
+    }
+
+    const match = value.match(/\b[A-Z0-9]{6}\b/i);
+    return match ? match[0].toUpperCase() : null;
+}
+
+async function handleScannedValue(rawValue) {
+    const code = extractRoomCode(rawValue);
+    if (!code) {
+        scannerStatus.textContent = "That QR code is not a valid B2B room code.";
+        return;
+    }
+
+    stopScanner();
+    closeScannerModal();
+    window.showToast("success", `Room ${code} found. Joining...`);
+    joinWithCode(code);
+}
+
+async function openScannerModal() {
+    scannerModal?.classList.remove("hidden");
+    scannerModal?.setAttribute("aria-hidden", "false");
+    scannerStatus.textContent = "Point your camera at the room QR code.";
+    await startScanner();
+}
+
+function closeScannerModal() {
+    stopScanner();
+    scannerModal?.classList.add("hidden");
+    scannerModal?.setAttribute("aria-hidden", "true");
+}
+
+async function startScanner() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+        scannerStatus.textContent = "Camera access is not available in this browser. Use the phone's normal camera app instead.";
+        return;
+    }
+
+    stopScanner();
+
+    try {
+        scannerStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: "environment" } },
+            audio: false
+        });
+
+        scannerVideo.srcObject = scannerStream;
+        await scannerVideo.play();
+        scannerRunning = true;
+        scannerStatus.textContent = "Scanning... point the camera at the QR code.";
+
+        scannerCanvas = scannerCanvas || document.createElement("canvas");
+        scannerCanvasContext = scannerCanvasContext || scannerCanvas.getContext("2d", { willReadFrequently: true });
+
+        scanLoop();
+    } catch (error) {
+        console.error("B2B: Camera error", error);
+        scannerStatus.textContent = error?.name === "NotAllowedError"
+            ? "Camera permission was denied. Allow camera access and try again."
+            : "Could not start the camera. Use the phone's normal camera app instead.";
+    }
+}
+
+async function scanLoop() {
+    if (!scannerRunning) return;
+
+    if (scannerVideo.readyState >= 2) {
+        const width = scannerVideo.videoWidth;
+        const height = scannerVideo.videoHeight;
+
+        if (width && height) {
+            scannerCanvas.width = width;
+            scannerCanvas.height = height;
+            scannerCanvasContext.drawImage(scannerVideo, 0, 0, width, height);
+
+            try {
+                if ("BarcodeDetector" in window) {
+                    const detector = scanLoop.detector || new BarcodeDetector({ formats: ["qr_code"] });
+                    scanLoop.detector = detector;
+                    const codes = await detector.detect(scannerVideo);
+                    if (codes.length && codes[0].rawValue) {
+                        await handleScannedValue(codes[0].rawValue);
+                        return;
+                    }
+                } else if (typeof window.jsQR === "function") {
+                    const imageData = scannerCanvasContext.getImageData(0, 0, width, height);
+                    const result = window.jsQR(imageData.data, imageData.width, imageData.height, {
+                        inversionAttempts: "attemptBoth"
+                    });
+                    if (result?.data) {
+                        await handleScannedValue(result.data);
+                        return;
+                    }
+                }
+            } catch (error) {
+                // Keep scanning. Browser detector support varies by device.
+            }
+        }
+    }
+
+    scannerAnimationFrame = requestAnimationFrame(scanLoop);
+}
+
+function stopScanner() {
+    scannerRunning = false;
+
+    if (scannerAnimationFrame) {
+        cancelAnimationFrame(scannerAnimationFrame);
+        scannerAnimationFrame = null;
+    }
+
+    if (scannerStream) {
+        scannerStream.getTracks().forEach((track) => track.stop());
+        scannerStream = null;
+    }
+
+    if (scannerVideo) scannerVideo.srcObject = null;
+    scanLoop.detector = null;
+}
+
+if (appScanConnectButton) appScanConnectButton.addEventListener("click", openScannerModal);
+if (startScannerButton) startScannerButton.addEventListener("click", startScanner);
+if (closeScannerButton) closeScannerButton.addEventListener("click", closeScannerModal);
+if (closeScannerActionButton) closeScannerActionButton.addEventListener("click", closeScannerModal);
+if (scannerModal) {
+    scannerModal.addEventListener("click", (event) => {
+        if (event.target === scannerModal) closeScannerModal();
+    });
+}
+
+// If a B2B QR URL was scanned by the phone's normal camera, the page opens
+// with ?room=XXXXXX and joins automatically.
+function autoJoinFromQrUrl() {
+    const code = new URLSearchParams(window.location.search).get("room");
+    if (!code) return;
+
+    const normalizedCode = code.trim().toUpperCase();
+    if (normalizedCode.length !== 6) return;
+
+    if (appRoomCodeInput) appRoomCodeInput.value = normalizedCode;
+    window.showToast("success", `Room ${normalizedCode} found. Joining...`);
+
+    setTimeout(() => joinWithCode(normalizedCode), 250);
 }
 
 window.showTransferSection = function showTransferSection() {
@@ -198,4 +405,5 @@ if (appDropZone && appFileInput) {
     });
 }
 
+autoJoinFromQrUrl();
 console.log("B2B: app.js loaded successfully");

@@ -178,16 +178,19 @@ window.showTransferSection = function showTransferSection() {
 if (appFileInput) {
     appFileInput.addEventListener("change", () => {
         const files = Array.from(appFileInput.files || []);
-        if (!appSelectedFiles) return;
 
         if (!files.length) {
-            appSelectedFiles.innerHTML = "";
+            if (typeof window.renderSelectedFiles === "function") {
+                window.renderSelectedFiles();
+            } else if (appSelectedFiles) {
+                appSelectedFiles.textContent = "";
+            }
             return;
         }
 
-        appSelectedFiles.textContent = files.length === 1
-            ? `Selected: ${files[0].name}`
-            : `${files.length} files selected`;
+        if (typeof window.renderSelectedFiles === "function") {
+            window.renderSelectedFiles();
+        }
     });
 }
 

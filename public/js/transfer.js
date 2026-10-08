@@ -2,20 +2,14 @@ let selectedFiles = [];
 
 let currentIncomingFile = null;
 let incomingFileWriter = null;
-let transferStartTime = null;
+let transferStartTime = 0;
 let bytesTransferred = 0;
-
 let incomingMessageQueue = Promise.resolve();
 
 window.currentOutgoingFile = null;
 window.outgoingFileQueue = [];
 window.outgoingTransferBusy = false;
 window.outgoingTransferToken = 0;
-
-
-// ==========================================
-// ELEMENTS
-// ==========================================
 
 const fileInput = document.getElementById("file-input");
 const sendFileButton = document.getElementById("send-file-btn");
@@ -43,7 +37,7 @@ if (fileInput) {
 
         console.log("Selected files:", selectedFiles);
 
-        if (selectedFiles.length) {
+        if (selectedFiles.length && transferStatus) {
             transferStatus.textContent =
                 `${selectedFiles.length} file${selectedFiles.length > 1 ? "s" : ""} selected. Ready to send.`;
         }
@@ -52,7 +46,7 @@ if (fileInput) {
 
 
 // ==========================================
-// SEND FILES
+// START OUTGOING TRANSFER
 // ==========================================
 
 if (sendFileButton) {
@@ -77,57 +71,56 @@ if (sendFileButton) {
         window.outgoingTransferBusy = true;
 
         console.log("Starting transfer queue:", window.outgoingFileQueue);
-
         await sendNextQueuedFile();
     });
 }
 
 
 async function sendNextQueuedFile() {
-    if (!window.outgoingTransferBusy) {
-        return;
-    }
+    if (!window.outgoingTransferBusy) return;
 
     if (!window.outgoingFileQueue.length) {
         window.currentOutgoingFile = null;
         window.outgoingTransferBusy = false;
-        transferStatus.textContent = "✅ All selected files sent successfully";
+        setTransferStatus("success", "All selected files sent successfully");
         return;
     }
 
-    if (!dataChannel || dataChannel.readyState !== "open") {
-        failOutgoingTransfer("Peer is no longer connected.");
+    if (!isDataChannelOpen()) {
+        stopOutgoingTransfer("Peer disconnected before the next file could start.", true);
         return;
     }
 
     const file = window.outgoingFileQueue.shift();
 
     if (!(file instanceof File)) {
-        failOutgoingTransfer("The selected file is no longer available.");
+        stopOutgoingTransfer("The selected file is no longer available.", false);
         return;
     }
 
+    const transferId = crypto.randomUUID();
+
     window.currentOutgoingFile = {
         file,
-        transferId: crypto.randomUUID()
+        transferId
     };
 
-    const metadata = {
+    const offer = {
         type: "FILE_OFFER",
-        transferId: window.currentOutgoingFile.transferId,
+        transferId,
         name: file.name,
         size: file.size,
         mimeType: file.type || "application/octet-stream"
     };
 
-    console.log("Sending file offer:", metadata);
+    console.log("Sending file offer:", offer);
 
     try {
-        dataChannel.send(JSON.stringify(metadata));
+        dataChannel.send(JSON.stringify(offer));
         showTransferProgress(`Waiting for receiver: ${file.name}`);
     } catch (error) {
         console.error("Could not send file offer:", error);
-        failOutgoingTransfer("Could not send the file offer.");
+        stopOutgoingTransfer("Could not send the file offer.", false);
     }
 }
 
@@ -138,9 +131,7 @@ async function sendNextQueuedFile() {
 
 if (acceptFileButton) {
     acceptFileButton.addEventListener("click", async () => {
-        if (!currentIncomingFile) {
-            return;
-        }
+        if (!currentIncomingFile) return;
 
         if (incomingFileWriter) {
             transferStatus.textContent = "Another incoming file is already being saved.";
@@ -150,6 +141,11 @@ if (acceptFileButton) {
         try {
             await prepareFileForWriting();
         } catch (error) {
+            if (error?.name === "AbortError") {
+                transferStatus.textContent = "Save cancelled. The file was not accepted.";
+                return;
+            }
+
             console.error("Could not prepare file:", error);
             transferStatus.textContent = "Could not create the destination file.";
         }
@@ -157,11 +153,9 @@ if (acceptFileButton) {
 }
 
 
-// ==========================================
-// PREPARE FILE WRITER
-// ==========================================
-
 async function prepareFileForWriting() {
+    if (!currentIncomingFile) return;
+
     if (!("showSaveFilePicker" in window)) {
         alert("Your browser does not support direct file saving. Please use Chrome or Edge.");
         return;
@@ -173,6 +167,11 @@ async function prepareFileForWriting() {
 
     incomingFileWriter = await fileHandle.createWritable();
 
+    if (!isDataChannelOpen()) {
+        await safeAbortWriter();
+        return;
+    }
+
     console.log("File writer ready.");
 
     dataChannel.send(JSON.stringify({
@@ -181,7 +180,6 @@ async function prepareFileForWriting() {
     }));
 
     incomingFileSection.classList.add("hidden");
-
     showTransferProgress(`Receiving: ${currentIncomingFile.name}`);
 
     bytesTransferred = 0;
@@ -190,7 +188,7 @@ async function prepareFileForWriting() {
 
 
 // ==========================================
-// HANDLE INCOMING DATA
+// DATA CHANNEL MESSAGE QUEUE
 // ==========================================
 
 function enqueueIncomingMessage(message) {
@@ -198,7 +196,7 @@ function enqueueIncomingMessage(message) {
         .then(() => handleIncomingTransferMessage(message))
         .catch((error) => {
             console.error("Incoming transfer error:", error);
-            transferStatus.textContent = "❌ File transfer failed on receiver.";
+            setTransferStatus("error", "File transfer failed on receiver.");
         });
 
     return incomingMessageQueue;
@@ -217,16 +215,16 @@ async function handleIncomingTransferMessage(message) {
             return;
         }
 
-        if (data.type === "FILE_OFFER") {
-            handleFileOffer(data);
-        }
-
-        if (data.type === "FILE_ACCEPT") {
-            await handleFileAccepted(data);
-        }
-
-        if (data.type === "FILE_END") {
-            await handleFileEnd(data);
+        switch (data.type) {
+            case "FILE_OFFER":
+                handleFileOffer(data);
+                break;
+            case "FILE_ACCEPT":
+                await handleFileAccepted(data);
+                break;
+            case "FILE_END":
+                await handleFileEnd(data);
+                break;
         }
 
         return;
@@ -238,58 +236,53 @@ async function handleIncomingTransferMessage(message) {
     }
 
     if (message instanceof Blob) {
-        const buffer = await message.arrayBuffer();
-        await writeIncomingChunk(buffer);
+        await writeIncomingChunk(await message.arrayBuffer());
     }
 }
 
 
 // ==========================================
-// FILE OFFER
+// INCOMING FILE OFFER
 // ==========================================
 
 function handleFileOffer(data) {
     console.log("Incoming file:", data);
 
     if (currentIncomingFile || incomingFileWriter) {
-        console.warn("Incoming file is already waiting or transferring.");
         transferStatus.textContent = "Another incoming file is already being handled.";
         return;
     }
 
     currentIncomingFile = data;
-
     incomingFileName.textContent = data.name;
     incomingFileSize.textContent = formatBytes(data.size);
-
     incomingFileSection.classList.remove("hidden");
 }
 
 
 // ==========================================
-// FILE ACCEPTED
+// RECEIVER ACCEPTED FILE
 // ==========================================
 
 async function handleFileAccepted(data) {
-    if (!window.currentOutgoingFile || !window.outgoingTransferBusy) {
-        return;
-    }
+    const outgoing = window.currentOutgoingFile;
 
-    if (data.transferId !== window.currentOutgoingFile.transferId) {
-        return;
-    }
+    if (!outgoing || !window.outgoingTransferBusy) return;
+    if (data.transferId !== outgoing.transferId) return;
 
     console.log("Receiver accepted file.");
 
     try {
-        await startFileSending(
-            window.currentOutgoingFile.file,
-            window.currentOutgoingFile.transferId
-        );
+        const result = await startFileSending(outgoing.file, outgoing.transferId);
+
+        if (result === "stopped") {
+            return;
+        }
     } catch (error) {
         console.error("File read/transfer error:", error);
-        failOutgoingTransfer(
-            error?.message || "The selected file could not be read."
+        stopOutgoingTransfer(
+            error?.message || "The selected file could not be read.",
+            false
         );
     }
 }
@@ -316,30 +309,31 @@ async function startFileSending(file, transferId) {
     dataChannel.bufferedAmountLowThreshold = LOW_WATER_MARK;
 
     for (let offset = 0; offset < file.size; offset += CHUNK_SIZE) {
-        if (
-            !window.outgoingTransferBusy ||
-            window.outgoingTransferToken !== transferToken ||
-            !window.currentOutgoingFile ||
-            window.currentOutgoingFile.transferId !== transferId
-        ) {
-            throw new Error("File transfer was cancelled.");
+        if (!window.outgoingTransferBusy || window.outgoingTransferToken !== transferToken) {
+            return "stopped";
         }
 
-        if (!dataChannel || dataChannel.readyState !== "open") {
-            throw new Error("P2P connection closed during file transfer.");
+        if (!isDataChannelOpen()) {
+            stopOutgoingTransfer("Peer disconnected during the transfer.", true);
+            return "stopped";
         }
 
         const end = Math.min(offset + CHUNK_SIZE, file.size);
         const chunk = await readFileChunkWithRetry(file, offset, end);
 
         if (!window.outgoingTransferBusy || window.outgoingTransferToken !== transferToken) {
-            throw new Error("File transfer was cancelled.");
+            return "stopped";
         }
 
-        await waitForBufferDrain(HIGH_WATER_MARK, transferToken);
+        const drained = await waitForBufferDrain(HIGH_WATER_MARK, transferToken);
 
-        if (!dataChannel || dataChannel.readyState !== "open") {
-            throw new Error("P2P connection closed during file transfer.");
+        if (!drained) {
+            return "stopped";
+        }
+
+        if (!isDataChannelOpen()) {
+            stopOutgoingTransfer("Peer disconnected during the transfer.", true);
+            return "stopped";
         }
 
         dataChannel.send(chunk);
@@ -348,8 +342,9 @@ async function startFileSending(file, transferId) {
         updateProgress(bytesTransferred, file.size);
     }
 
-    if (!dataChannel || dataChannel.readyState !== "open") {
-        throw new Error("P2P connection closed before the file could finish.");
+    if (!isDataChannelOpen()) {
+        stopOutgoingTransfer("Peer disconnected before the file finished.", true);
+        return "stopped";
     }
 
     dataChannel.send(JSON.stringify({
@@ -361,17 +356,21 @@ async function startFileSending(file, transferId) {
 
     window.currentOutgoingFile = null;
 
-    if (window.outgoingFileQueue.length === 0) {
+    if (!window.outgoingFileQueue.length) {
         window.outgoingTransferBusy = false;
-        transferStatus.textContent = "✅ All selected files sent successfully";
-        return;
+        setTransferStatus("success", "All selected files sent successfully");
+        return "complete";
     }
 
     transferStatus.textContent = "Preparing next file...";
 
     setTimeout(() => {
-        sendNextQueuedFile();
+        if (window.outgoingTransferBusy) {
+            sendNextQueuedFile();
+        }
     }, 100);
+
+    return "queued";
 }
 
 
@@ -380,30 +379,16 @@ async function startFileSending(file, transferId) {
 // ==========================================
 
 async function readFileChunkWithRetry(file, start, end) {
-    const maxAttempts = 3;
-    let lastError = null;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
         try {
             return await file.slice(start, end).arrayBuffer();
         } catch (error) {
-            lastError = error;
-            console.warn(
-                `Could not read file chunk ${start}-${end} (attempt ${attempt}/${maxAttempts}).`,
-                error
-            );
-
-            if (attempt < maxAttempts) {
-                await delay(attempt * 150);
-            }
+            if (attempt === 3) throw error;
+            await delay(attempt * 150);
         }
     }
-
-    throw new Error(
-        `The file could not be read at byte ${start}. ` +
-        `It may have been moved, deleted, locked, or become unavailable.`
-    );
 }
+
 
 function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -411,40 +396,42 @@ function delay(ms) {
 
 
 // ==========================================
-// BUFFER DRAIN
+// BACKPRESSURE
 // ==========================================
 
 function waitForBufferDrain(highWaterMark, transferToken) {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
         const startedAt = performance.now();
         const TIMEOUT = 30000;
 
         const check = () => {
             if (!window.outgoingTransferBusy || window.outgoingTransferToken !== transferToken) {
-                reject(new Error("File transfer was cancelled."));
+                resolve(false);
                 return;
             }
 
-            if (!dataChannel || dataChannel.readyState !== "open") {
-                reject(new Error("P2P connection closed during file transfer."));
+            if (!isDataChannelOpen()) {
+                resolve(false);
                 return;
             }
 
             if (dataChannel.bufferedAmount <= 2 * 1024 * 1024) {
-                resolve();
+                resolve(true);
                 return;
             }
 
             if (performance.now() - startedAt > TIMEOUT) {
-                reject(new Error("P2P data channel stopped draining."));
+                console.error("P2P data channel stopped draining.");
+                stopOutgoingTransfer("Transfer timed out while sending data.", false);
+                resolve(false);
                 return;
             }
 
             setTimeout(check, 10);
         };
 
-        if (dataChannel.bufferedAmount <= highWaterMark) {
-            resolve();
+        if (dataChannel && dataChannel.bufferedAmount <= highWaterMark) {
+            resolve(true);
         } else {
             check();
         }
@@ -453,16 +440,21 @@ function waitForBufferDrain(highWaterMark, transferToken) {
 
 
 // ==========================================
-// WRITE INCOMING CHUNK
+// RECEIVE CHUNKS
 // ==========================================
 
 async function writeIncomingChunk(chunk) {
-    if (!incomingFileWriter || !currentIncomingFile) {
-        console.warn("Received chunk but file writer is not ready.");
+    if (!incomingFileWriter || !currentIncomingFile) return;
+
+    try {
+        await incomingFileWriter.write(chunk);
+    } catch (error) {
+        console.error("Could not write incoming file chunk:", error);
+        setTransferStatus("error", "Could not write the received file.");
+        await safeAbortWriter();
+        currentIncomingFile = null;
         return;
     }
-
-    await incomingFileWriter.write(chunk);
 
     bytesTransferred += chunk.byteLength;
     updateProgress(bytesTransferred, currentIncomingFile.size);
@@ -474,22 +466,23 @@ async function writeIncomingChunk(chunk) {
 // ==========================================
 
 async function handleFileEnd(data) {
-    if (!incomingFileWriter || !currentIncomingFile) {
-        return;
-    }
-
-    if (data.transferId !== currentIncomingFile.transferId) {
-        return;
-    }
+    if (!incomingFileWriter || !currentIncomingFile) return;
+    if (data.transferId !== currentIncomingFile.transferId) return;
 
     console.log("File transfer finished:", currentIncomingFile.name);
 
-    await incomingFileWriter.close();
-    incomingFileWriter = null;
+    try {
+        await incomingFileWriter.close();
+        incomingFileWriter = null;
 
-    transferStatus.textContent = "✅ File received successfully";
-
-    currentIncomingFile = null;
+        setTransferStatus("success", "File received successfully");
+        currentIncomingFile = null;
+    } catch (error) {
+        console.error("Could not finalize incoming file:", error);
+        await safeAbortWriter();
+        currentIncomingFile = null;
+        setTransferStatus("error", "Could not finish saving the received file.");
+    }
 }
 
 
@@ -497,23 +490,30 @@ async function handleFileEnd(data) {
 // DISCONNECT / CANCEL
 // ==========================================
 
-function failOutgoingTransfer(message) {
+function stopOutgoingTransfer(message, expectedDisconnect = false) {
     const hasActiveTransfer =
         window.outgoingTransferBusy ||
         window.currentOutgoingFile ||
         window.outgoingFileQueue.length > 0;
 
-    if (!hasActiveTransfer) {
-        return;
-    }
+    if (!hasActiveTransfer) return;
 
     window.outgoingTransferToken += 1;
     window.currentOutgoingFile = null;
     window.outgoingFileQueue = [];
     window.outgoingTransferBusy = false;
 
-    transferStatus.textContent = `❌ ${message}`;
-    console.error("Outgoing transfer stopped:", message);
+    setTransferStatus(expectedDisconnect ? "warning" : "error", message);
+
+    if (expectedDisconnect) {
+        console.warn("Outgoing transfer stopped:", message);
+    } else {
+        console.error("Outgoing transfer stopped:", message);
+    }
+}
+
+function failOutgoingTransfer(message) {
+    stopOutgoingTransfer(message, true);
 }
 
 function resetOutgoingTransferState() {
@@ -523,15 +523,11 @@ function resetOutgoingTransferState() {
     }
 }
 
-async function handleIncomingTransferDisconnect() {
-    const hadIncomingTransfer = Boolean(currentIncomingFile || incomingFileWriter);
-
-    if (!hadIncomingTransfer) {
-        return;
-    }
+async function safeAbortWriter() {
+    if (!incomingFileWriter) return;
 
     try {
-        if (incomingFileWriter && typeof incomingFileWriter.abort === "function") {
+        if (typeof incomingFileWriter.abort === "function") {
             await incomingFileWriter.abort();
         }
     } catch (error) {
@@ -539,13 +535,21 @@ async function handleIncomingTransferDisconnect() {
     }
 
     incomingFileWriter = null;
+}
+
+async function handleIncomingTransferDisconnect() {
+    const hadIncomingTransfer = Boolean(currentIncomingFile || incomingFileWriter);
+
+    if (!hadIncomingTransfer) return;
+
+    await safeAbortWriter();
     currentIncomingFile = null;
 
     if (incomingFileSection) {
         incomingFileSection.classList.add("hidden");
     }
 
-    transferStatus.textContent = "❌ File transfer interrupted because the peer disconnected.";
+    setTransferStatus("warning", "File transfer interrupted because the peer disconnected.");
 }
 
 window.failOutgoingTransfer = failOutgoingTransfer;
@@ -554,45 +558,49 @@ window.handleIncomingTransferDisconnect = handleIncomingTransferDisconnect;
 
 
 // ==========================================
-// PROGRESS
+// UI HELPERS
 // ==========================================
 
-function updateProgress(current, total) {
-    const percentage = total === 0 ? 0 : (current / total) * 100;
+function showTransferProgress(title = "Transfer") {
+    transferProgressSection.classList.remove("hidden");
+    transferTitle.textContent = title;
+    progressBar.style.width = "0%";
+    progressText.textContent = "0%";
+    transferSpeed.textContent = "Speed: 0 MB/s";
+}
 
-    progressBar.style.width = `${percentage}%`;
+function setTransferStatus(type, message) {
+    if (!transferStatus) return;
+
+    transferStatus.textContent = message;
+    transferStatus.dataset.status = type;
+}
+
+function updateProgress(current, total) {
+    const percentage = total > 0 ? (current / total) * 100 : 0;
+
+    progressBar.style.width = `${Math.min(100, percentage)}%`;
     progressText.textContent = `${percentage.toFixed(1)}%`;
 
     const elapsed = (performance.now() - transferStartTime) / 1000;
-
     if (elapsed > 0) {
         const speed = current / elapsed;
         transferSpeed.textContent = `Speed: ${formatBytes(speed)}/s`;
     }
 }
 
-
-// ==========================================
-// SHOW PROGRESS
-// ==========================================
-
-function showTransferProgress(title = "Transfer") {
-    transferProgressSection.classList.remove("hidden");
-    transferTitle.textContent = title;
+function isDataChannelOpen() {
+    return Boolean(dataChannel && dataChannel.readyState === "open");
 }
 
-
-// ==========================================
-// FORMAT BYTES
-// ==========================================
-
 function formatBytes(bytes) {
-    if (bytes === 0) {
-        return "0 Bytes";
-    }
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 Bytes";
 
     const units = ["Bytes", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    const i = Math.min(
+        Math.floor(Math.log(bytes) / Math.log(1024)),
+        units.length - 1
+    );
 
     return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${units[i]}`;
 }

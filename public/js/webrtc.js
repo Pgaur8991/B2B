@@ -150,11 +150,103 @@ async function handleIceCandidate(candidate) {
 
 
 // =========================
+// DATA CHANNEL PERFORMANCE
+// =========================
+
+function optimizeDataChannel(channel) {
+    if (!channel || channel.__b2bOptimized) return;
+
+    channel.__b2bOptimized = true;
+    channel.bufferedAmountLowThreshold = 2 * 1024 * 1024;
+
+    const negotiatedMax = Number(peerConnection?.sctp?.maxMessageSize) || 65536;
+    const maxMessageSize = negotiatedMax === 0 ? 256 * 1024 : negotiatedMax;
+
+    // transfer.js currently produces 64 KB chunks. If the browsers negotiated
+    // a larger SCTP message size, combine those chunks to reduce message overhead.
+    const targetSize =
+        maxMessageSize >= 256 * 1024 ? 256 * 1024 :
+        maxMessageSize >= 128 * 1024 ? 128 * 1024 :
+        64 * 1024;
+
+    console.log(`DataChannel max message size: ${negotiatedMax} bytes`);
+    console.log(`B2B transfer aggregation target: ${targetSize} bytes`);
+
+    // If the negotiated limit is only 64 KB, keep the existing safe behavior.
+    if (targetSize <= 64 * 1024) return;
+
+    const originalSend = channel.send.bind(channel);
+    let pendingChunks = [];
+    let pendingBytes = 0;
+    let flushTimer = null;
+
+    const clearPending = () => {
+        pendingChunks = [];
+        pendingBytes = 0;
+        if (flushTimer !== null) {
+            clearTimeout(flushTimer);
+            flushTimer = null;
+        }
+    };
+
+    const flushPending = () => {
+        if (!pendingBytes) return;
+
+        if (channel.readyState !== "open") {
+            clearPending();
+            return;
+        }
+
+        const merged = new Uint8Array(pendingBytes);
+        let offset = 0;
+
+        for (const chunk of pendingChunks) {
+            merged.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
+
+        clearPending();
+        originalSend(merged.buffer);
+    };
+
+    const scheduleFlush = () => {
+        if (flushTimer !== null) return;
+        flushTimer = setTimeout(() => {
+            flushTimer = null;
+            flushPending();
+        }, 6);
+    };
+
+    channel.send = (payload) => {
+        // File data is sent by transfer.js as ArrayBuffer chunks. Control
+        // messages are flushed separately so their JSON boundaries remain intact.
+        if (payload instanceof ArrayBuffer && payload.byteLength <= 64 * 1024) {
+            pendingChunks.push(new Uint8Array(payload));
+            pendingBytes += payload.byteLength;
+
+            if (pendingBytes >= targetSize) {
+                flushPending();
+            } else {
+                scheduleFlush();
+            }
+            return;
+        }
+
+        flushPending();
+        return originalSend(payload);
+    };
+
+    channel.addEventListener("close", clearPending, { once: true });
+}
+
+
+// =========================
 // DATA CHANNEL
 // =========================
 
 function setupDataChannel() {
     dataChannel.binaryType = "arraybuffer";
+    optimizeDataChannel(dataChannel);
 
     dataChannel.onopen = () => {
         console.log("🎉 DataChannel OPEN!");
@@ -190,7 +282,10 @@ function setupDataChannel() {
     };
 
     dataChannel.onmessage = (event) => {
-        console.log("Data received:", event.data);
+        // Avoid logging every binary chunk; that can noticeably hurt mobile performance.
+        if (typeof event.data === "string") {
+            console.log("Data received:", event.data);
+        }
 
         if (typeof enqueueIncomingMessage === "function") {
             enqueueIncomingMessage(event.data);
